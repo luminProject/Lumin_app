@@ -1,0 +1,57 @@
+# Flutter / Dart
+.dart_tool/
+.buildlog/
+.packages
+.pub/
+.pub-cache/
+build/
+coverage/
+
+# Platform builds
+android/.gradle/
+android/local.properties
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+macos/Pods/
+macos/Flutter/ephemeral/
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+.DS_Store
+
+# Secrets
+.env
+*.key
+*.pem
+
+# Python
+lumin_backend/.venv/
+lumin_backend/__pycache__/
+*.pyc
+
+# env
+lumin_backend/.env
+lumin_backend/.env.*
+
+# secrets
+lumin_backend/.env
+lumin_backend/.env.*
+**/.env
+**/.env.*
+
+# python
+lumin_backend/.venv/
+**/__pycache__/
+**/*.pyc
+
+# flutter
+**/.dart_tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
