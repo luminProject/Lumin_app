@@ -7,6 +7,8 @@ import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/theme/app_colors.dart';
 import 'package:lumin_application/Recomendation/notificationspage.dart';
 
+// ✅ 1. استدعاء ملف الـ API
+import 'package:lumin_application/services/api_service.dart';
 
 class DeviceManagementPage extends StatefulWidget {
   const DeviceManagementPage({super.key});
@@ -18,12 +20,54 @@ class DeviceManagementPage extends StatefulWidget {
 class _DeviceManagementPageState extends State<DeviceManagementPage> {
   int _filter = 0; // 0=All, 1=Connected, 2=Disconnected
 
-  final List<DeviceItem> _devices = [
-    const DeviceItem(name: 'Master Bedroom AC', value: '34 kWh', connected: true, running: false),
-    const DeviceItem(name: 'Living Room AC', value: '21 kWh', connected: true, running: true),
-    const DeviceItem(name: 'Kitchen Fridge', value: '12 kWh', connected: true, running: true),
-    const DeviceItem(name: 'Living Room TV', value: '0.0 kW', connected: false, running: false),
-  ];
+  // ✅ 2. حذفنا البيانات الوهمية، وجعلنا القائمة فارغة في البداية
+  List<DeviceItem> _devices = [];
+  
+  // ✅ 3. متغيرات لحالة التحميل والخطأ
+  bool _isLoading = true;
+  String? _errorMessage;
+  final ApiService _apiService = ApiService();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDevicesFromApi(); // جلب البيانات أول ما تفتح الصفحة
+  }
+
+  // ✅ 4. دالة جلب الأجهزة من الباك إند وتحويلها إلى شكل DeviceItem الخاص بكم
+  Future<void> _fetchDevicesFromApi() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final data = await _apiService.getDevices();
+      
+      final List<DeviceItem> fetchedDevices = data.map<DeviceItem>((json) {
+        return DeviceItem(
+          name: json['device_name'] ?? 'Unknown Device',
+          value: json['device_type'] ?? 'Unknown',
+          connected: true, // افتراضي لأن الباك إند حالياً لا يرسل حالة الاتصال
+          running: true,   // افتراضي
+        );
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _devices = fetchedDevices;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   List<DeviceItem> get _filtered {
     return _devices.where((d) {
@@ -72,6 +116,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     if (result != true) return;
     if (!mounted) return;
 
+    // TODO: مستقبلاً يمكنك إضافة كود API هنا لحذف الجهاز من قاعدة البيانات
     setState(() => _devices.remove(d));
   }
 
@@ -109,142 +154,171 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
           ],
         ),
 
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 52), // compensate transparent appbar
-
-                // ===== Stats =====
-                GlassCard(
-                  radius: 18,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _StatInline(
-                          value: disconnectedCount.toString(),
-                          label: 'Disconnected',
-                        ),
-                      ),
-                      Container(
-                        width: 1,
-                        height: 44,
-                        color: Colors.white.withOpacity(0.10),
-                      ),
-                      Expanded(
-                        child: _StatInline(
-                          value: connectedCount.toString(),
-                          label: 'Connected',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // ===== Filters + Add (✅ no right overflow) =====
-                Row(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        child: Row(
-                          children: [
-                            _FilterChip(
-                              text: 'All',
-                              selected: _filter == 0,
-                              onTap: () => setState(() => _filter = 0),
-                            ),
-                            const SizedBox(width: 8),
-                            _FilterChip(
-                              text: 'Connected',
-                              selected: _filter == 1,
-                              onTap: () => setState(() => _filter = 1),
-                            ),
-                            const SizedBox(width: 8),
-                            _FilterChip(
-                              text: 'Disconnected',
-                              selected: _filter == 2,
-                              onTap: () => setState(() => _filter = 2),
-                            ),
-                          ],
-                        ),
-                      ),
+        // ✅ 5. عرض الواجهة بناءً على حالة التحميل
+        body: _isLoading 
+            ? const Center(child: CircularProgressIndicator(color: AppColors.mint))
+            : _errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.white54, size: 48),
+                        const SizedBox(height: 16),
+                        Text('Failed to load devices\n$_errorMessage', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _fetchDevicesFromApi,
+                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.button),
+                          child: const Text('Try Again'),
+                        )
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      height: 38,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const AddDevicePage()),
-                          );
-                        },
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Add', style: TextStyle(fontWeight: FontWeight.w900)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.button,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  )
+                : SafeArea(
+          // ✅ 6. تغليف القائمة بـ RefreshIndicator لتمكين السحب للتحديث
+          child: RefreshIndicator(
+            onRefresh: _fetchDevicesFromApi,
+            color: AppColors.mint,
+            backgroundColor: const Color(0xFF1C2B2D),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+              // لضمان عمل السحب للتحديث حتى لو كانت القائمة قصيرة
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 52), // compensate transparent appbar
 
-                const SizedBox(height: 12),
-
-                // ===== Devices list =====
-                if (filtered.isEmpty)
+                  // ===== Stats =====
                   GlassCard(
                     radius: 18,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     child: Row(
                       children: [
-                        Icon(Icons.info_outline_rounded, color: Colors.white.withOpacity(0.65)),
-                        const SizedBox(width: 10),
                         Expanded(
-                          child: Text(
-                            'No devices in this filter.',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.70),
-                              fontWeight: FontWeight.w700,
-                            ),
+                          child: _StatInline(
+                            value: disconnectedCount.toString(),
+                            label: 'Disconnected',
+                          ),
+                        ),
+                        Container(
+                          width: 1,
+                          height: 44,
+                          color: Colors.white.withOpacity(0.10),
+                        ),
+                        Expanded(
+                          child: _StatInline(
+                            value: connectedCount.toString(),
+                            label: 'Connected',
                           ),
                         ),
                       ],
                     ),
-                  )
-                else
-                  ...List.generate(filtered.length, (i) {
-                    final d = filtered[i];
-                    return Padding(
-                      padding: EdgeInsets.only(bottom: i == filtered.length - 1 ? 0 : 10),
-                      child: DeviceCard(
-                        fullWidth: true,
-                        title: d.name,
-                        value: d.value,
-                        active: d.connected,
-                        running: d.running,
-                        // المنيو من الثلاث نقاط داخل الكارد
-                        onSettings: () {
-                          // روحي لصفحة إعدادات الجهاز عندك
-                          // Navigator.push(context, MaterialPageRoute(builder: (_) => DeviceSetupPage(device: d)));
-                        },
-                        onDelete: () => _confirmDelete(d),
-                      ),
-                    );
-                  }),
+                  ),
 
-                const SizedBox(height: 100), // ✅ مساحة كفاية عشان ما يختفي آخر كرت تحت الـ bottom nav
-              ],
+                  const SizedBox(height: 12),
+
+                  // ===== Filters + Add (✅ no right overflow) =====
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                text: 'All',
+                                selected: _filter == 0,
+                                onTap: () => setState(() => _filter = 0),
+                              ),
+                              const SizedBox(width: 8),
+                              _FilterChip(
+                                text: 'Connected',
+                                selected: _filter == 1,
+                                onTap: () => setState(() => _filter = 1),
+                              ),
+                              const SizedBox(width: 8),
+                              _FilterChip(
+                                text: 'Disconnected',
+                                selected: _filter == 2,
+                                onTap: () => setState(() => _filter = 2),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        height: 38,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const AddDevicePage()),
+                            ).then((_) => _fetchDevicesFromApi()); // تحديث بعد الإضافة
+                          },
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Add', style: TextStyle(fontWeight: FontWeight.w900)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.button,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // ===== Devices list =====
+                  if (filtered.isEmpty)
+                    GlassCard(
+                      radius: 18,
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Colors.white.withOpacity(0.65)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'No devices in this filter.',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.70),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ...List.generate(filtered.length, (i) {
+                      final d = filtered[i];
+                      return Padding(
+                        padding: EdgeInsets.only(bottom: i == filtered.length - 1 ? 0 : 10),
+                        // ✅ لم نقم بتغيير أي شيء في كرت الجهاز الخاص بكم
+                        child: DeviceCard(
+                          fullWidth: true,
+                          title: d.name,
+                          value: d.value,
+                          active: d.connected,
+                          running: d.running,
+                          // المنيو من الثلاث نقاط داخل الكارد
+                          onSettings: () {
+                            // روحي لصفحة إعدادات الجهاز عندك
+                            // Navigator.push(context, MaterialPageRoute(builder: (_) => DeviceSetupPage(device: d)));
+                          },
+                          onDelete: () => _confirmDelete(d),
+                        ),
+                      );
+                    }),
+
+                  const SizedBox(height: 100), // ✅ مساحة كفاية عشان ما يختفي آخر كرت تحت الـ bottom nav
+                ],
+              ),
             ),
           ),
         ),

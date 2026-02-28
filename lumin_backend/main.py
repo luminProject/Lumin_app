@@ -1,14 +1,17 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 import os
 import uuid
 
 from dotenv import load_dotenv
-from supabase import create_client
-from app.routes import router as profile_router
-
 load_dotenv()
+
+from app.routes import router as profile_router
+from app.core.interfaces import SmartEnergyFacade
+
+from supabase import create_client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -17,9 +20,18 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY in .env")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+facade = SmartEnergyFacade(supabase)
 
 app = FastAPI(title="LUMIN Backend")
 app.include_router(profile_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class SensorReadingIn(BaseModel):
@@ -35,6 +47,11 @@ class SensorReadingIn(BaseModel):
     recorded_at: datetime | None = None
 
 
+class DeviceCreate(BaseModel):
+    name: str
+    device_type: str
+
+
 @app.get("/")
 def root():
     return {"message": "Lumin backend is running"}
@@ -42,74 +59,88 @@ def root():
 
 @app.post("/sensor-readings")
 def ingest_sensor_reading(payload: SensorReadingIn):
-    # 0) استخرج القيم مع دعم التوافق للخلف
+    # 0) Extract values with backward compatibility
     kwh_value = payload.kwh_value if payload.kwh_value is not None else payload.kwh
     reading_time = payload.reading_time if payload.reading_time is not None else payload.recorded_at
 
     if kwh_value is None:
         raise HTTPException(status_code=400, detail="Missing kwh_value (or kwh)")
 
-    # 1) تحقق أن الجهاز موجود وجيب user_id (حسب ERD: device.user_id)
-    device_res = (
-        supabase.table("device")
-        .select("user_id")
-        .eq("device_id", payload.device_id)
-        .limit(1)
-        .execute()
-    )
-
-    if not device_res.data:
-        raise HTTPException(status_code=404, detail="Device not found")
-
-    # 2) خزّن القراءة في sensor_data (حسب الأعمدة: device_id, reading_time, kwh_value)
-    row = {
-        "device_id": payload.device_id,
-        "reading_time": (reading_time or datetime.utcnow()).isoformat(),
-        "kwh_value": float(kwh_value),
-    }
-
-    result = supabase.table("sensor_data").insert(row).execute()
-    return {"status": "stored", "data": result.data}
+    try:
+        return facade.ingest_sensor_reading(
+            device_id=payload.device_id,
+            kwh_value=float(kwh_value),
+            reading_time_iso=(reading_time or datetime.utcnow()).isoformat(),
+        )
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Device not found":
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
 
 
 @app.get("/energy/{user_id}")
 def get_energy(user_id: str):
-    # 1) جيب كل أجهزة المستخدم
-    devices_res = (
-        supabase.table("device")
-        .select("device_id")
-        .eq("user_id", user_id)
-        .execute()
-    )
+    try:
+        return facade.get_energy(user_id=user_id)
+    except ValueError as e:
+        msg = str(e)
+        if msg in ("No devices found", "No valid device_id found", "No energy data found"):
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
 
-    if not devices_res.data:
-        raise HTTPException(status_code=404, detail="No devices found for this user")
+# =============================
+# FACADE ROUTES
+# =============================
 
-    device_ids = [d["device_id"] for d in devices_res.data if d.get("device_id") is not None]
+@app.get("/devices/{user_id}")
+def get_devices(user_id: str):
+    try:
+        return {
+            "status": "success",
+            "data": facade.view_devices(user_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    if not device_ids:
-        raise HTTPException(status_code=404, detail="No valid device_id found for this user")
 
-    # 2) جيب قراءات السنسور لهذه الأجهزة
-    result = (
-        supabase.table("sensor_data")
-        .select("kwh_value, reading_time, device_id")
-        .in_("device_id", device_ids)
-        .order("reading_time", desc=True)
-        .execute()
-    )
+@app.post("/devices/{user_id}")
+def add_device(user_id: str, device: DeviceCreate):
+    try:
+        res = facade.add_new_device(user_id, device.name, device.device_type)
+        return {"status": "success", "data": res}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    if not result.data:
-        raise HTTPException(status_code=404, detail="No energy data found")
 
-    total_today = sum(float(item.get("kwh_value") or 0) for item in result.data)
-    total_month = total_today  # مؤقت (نحسبها لاحقًا حسب الشهر)
+@app.get("/bill/{user_id}")
+def get_bill(user_id: str):
+    try:
+        return {
+            "status": "success",
+            "data": facade.get_my_current_bill(user_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    latest = result.data[0]
 
-    return {
-        "user_id": user_id,
-        "total_kwh_today": total_today,
-        "total_kwh_month": total_month,
-        "latest": latest,
-    }
+@app.get("/solar-forecast/{user_id}")
+def get_solar_forecast(user_id: str):
+    try:
+        return {
+            "status": "success",
+            "data": facade.get_solar_prediction(user_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/recommendations/{user_id}")
+def get_recommendations(user_id: str):
+    try:
+        return {
+            "status": "success",
+            "data": facade.view_recommendations(user_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
