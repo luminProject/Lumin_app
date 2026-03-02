@@ -242,7 +242,7 @@ class _StatsCardExactState extends State<StatsCardExact> {
             children: [
               Expanded(
                 child: DropdownButtonFormField<int>(
-                  value: m,
+                  initialValue: m,
                   dropdownColor: const Color(0xFF0B2F32),
                   decoration: const InputDecoration(
                     labelText: 'Month',
@@ -265,7 +265,7 @@ class _StatsCardExactState extends State<StatsCardExact> {
               const SizedBox(width: 12),
               Expanded(
                 child: DropdownButtonFormField<int>(
-                  value: y,
+                  initialValue: y,
                   dropdownColor: const Color(0xFF0B2F32),
                   decoration: const InputDecoration(
                     labelText: 'Year',
@@ -313,7 +313,7 @@ class _StatsCardExactState extends State<StatsCardExact> {
           backgroundColor: const Color(0xFF0B2F32),
           title: const Text('Select year', style: TextStyle(color: Colors.white)),
           content: DropdownButtonFormField<int>(
-            value: y,
+            initialValue: y,
             dropdownColor: const Color(0xFF0B2F32),
             decoration: const InputDecoration(
               labelText: 'Year',

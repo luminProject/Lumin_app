@@ -17,6 +17,8 @@ class LuminFacade:
     - viewRecommendations
     - getNotifications
     """
+    def __init__(self, supabase_client):
+        self.supabase = supabase_client
 
     # -----------------------------
     # DEVICE MANAGEMENT (DeviceFactory & Device Classes)
@@ -173,6 +175,7 @@ class LuminFacade:
         return res.data or []
 
     def get_notifications(self, user_id: str) -> List[Dict[str, Any]]:
+
         """
         الـ Notification class يخزن محتوى الإشعار (content)، نوعه (type)، وقته (time).
         """
@@ -185,3 +188,5 @@ class LuminFacade:
             .execute()
         )
         return res.data or []
+    
+# هذي الي جبتها من كلاس facede الثاني

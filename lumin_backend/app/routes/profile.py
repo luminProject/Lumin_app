@@ -1,62 +1,39 @@
-# lumin_backend/app/routes/profile.py
-from __future__ import annotations
-
-from uuid import UUID
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.supabase_client import supabase
+from app.core.SmartEnergyFacade import SmartEnergyFacade  # انتبهي للاسم/المسار
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
+facade = SmartEnergyFacade(supabase)
+
 
 class ProfileOut(BaseModel):
-    user_id: UUID
-    username: str | None = None
-    phone_number: str | None = None
-    location: str | None = None
+    user_id: str
+    username: Optional[str] = None
+    phone_number: Optional[str] = None
+    location: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class ProfileUpdate(BaseModel):
-    username: str | None = None
-    phone_number: str | None = None
-    location: str | None = None
+    username: Optional[str] = None
+    phone_number: Optional[str] = None
+    location: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 @router.get("/{user_id}", response_model=ProfileOut)
-def get_profile(user_id: UUID):
-    res = (
-        supabase.table("users")
-        .select("user_id,username,phone_number,location")
-        .eq("user_id", str(user_id))
-        .maybe_single()
-        .execute()
-    )
-
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    return res.data
+def get_profile(user_id: str):
+    return facade.get_profile(user_id=user_id)
 
 
 @router.patch("/{user_id}", response_model=ProfileOut)
-def update_profile(user_id: UUID, payload: ProfileUpdate):
-    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
-
-    if not update_data:
-        raise HTTPException(status_code=400, detail="No fields provided")
-
-    res = (
-        supabase.table("users")
-        .update(update_data)
-        .eq("user_id", str(user_id))
-        .select("user_id,username,phone_number,location")
-        .maybe_single()
-        .execute()
+def update_profile(user_id: str, payload: ProfileUpdate):
+    return facade.update_profile(
+        user_id=user_id,
+        info=payload.model_dump(exclude_none=True),
     )
-
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    return res.data

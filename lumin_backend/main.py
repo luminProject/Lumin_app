@@ -4,26 +4,25 @@ from pydantic import BaseModel
 from datetime import datetime
 import os
 import uuid
-
 from dotenv import load_dotenv
-load_dotenv()
-
 from app.routes import router as profile_router
-from app.core.interfaces import SmartEnergyFacade
+from app.core.SmartEnergyFacade import SmartEnergyFacade
 
-from supabase import create_client
+import supabase as supabase_
 
+
+load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY in .env")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = supabase_.create_client(SUPABASE_URL, SUPABASE_KEY)
 facade = SmartEnergyFacade(supabase)
 
 app = FastAPI(title="LUMIN Backend")
-app.include_router(profile_router)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +32,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Profile routes
+app.include_router(profile_router)
 
 class SensorReadingIn(BaseModel):
     # device_id في قاعدة البيانات int4
