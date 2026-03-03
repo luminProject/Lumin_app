@@ -322,7 +322,7 @@ class _LoginPageState extends State<LoginPage> {
                           ? const SizedBox(
                               width: 22,
                               height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2,color: AppColors.mint,),
                             )
                           : const Text(
                               'Log In',

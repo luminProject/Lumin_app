@@ -28,6 +28,7 @@ class _SignupPageState extends State<SignupPage> {
   bool _hasSolarPanels = true;
 
   String _fullPhone = '';
+  bool _isPhoneValid = false; // ✅ phone validity (per selected country)
   bool _loading = false;
 
   // ✅ Password live rules
@@ -59,46 +60,45 @@ class _SignupPageState extends State<SignupPage> {
     super.dispose();
   }
 
-  // ✅ SnackBar styled like your app
   void _showMessage(String message, {bool isError = true}) {
-  final snackBar = SnackBar(
-    behavior: SnackBarBehavior.floating,
-    elevation: 8,
-    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-    backgroundColor: const Color(0xFF0F2A33), // ✅ لون ثابت من جوّ التطبيق (dark teal)
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(14),
-      side: BorderSide(
-        color: isError ? Colors.redAccent : AppColors.button,
-        width: 1.4,
-      ),
-    ),
-    duration: const Duration(seconds: 3),
-    content: Row(
-      children: [
-        Icon(
-          isError ? Icons.error_outline : Icons.check_circle_outline,
+    final snackBar = SnackBar(
+      behavior: SnackBarBehavior.floating,
+      elevation: 8,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      backgroundColor: const Color(0xFF0F2A33),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
           color: isError ? Colors.redAccent : AppColors.button,
+          width: 1.4,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            message,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
+      ),
+      duration: const Duration(seconds: 3),
+      content: Row(
+        children: [
+          Icon(
+            isError ? Icons.error_outline : Icons.check_circle_outline,
+            color: isError ? Colors.redAccent : AppColors.button,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
 
-  ScaffoldMessenger.of(context)
-    ..clearSnackBars()
-    ..showSnackBar(snackBar);
-}
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(snackBar);
+  }
 
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[^@]+@[^@]+\.[^@]+$');
@@ -175,7 +175,11 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
-    // ✅ digits-only check (مع السماح بـ +)
+    if (!_isPhoneValid) {
+      _showMessage('Please enter a valid phone number for the selected country.');
+      return;
+    }
+
     final cleaned = _fullPhone.replaceAll('+', '').replaceAll(' ', '');
     if (!RegExp(r'^\d+$').hasMatch(cleaned)) {
       _showMessage('Phone number must contain digits only.');
@@ -207,7 +211,6 @@ class _SignupPageState extends State<SignupPage> {
     try {
       final pos = await _requireLocationAndGet();
 
-      // ✅ Supabase يمنع تكرار الايميل تلقائيًا
       final res = await Supabase.instance.client.auth.signUp(
         email: email,
         password: password,
@@ -215,7 +218,6 @@ class _SignupPageState extends State<SignupPage> {
 
       final user = res.user;
 
-      // ✅ إذا Email confirmation ON ممكن يرجع user = null
       if (user == null) {
         _showMessage(
           'Check your email to confirm your account, then log in.',
@@ -372,9 +374,9 @@ class _SignupPageState extends State<SignupPage> {
                               _field(
                                 IntlPhoneField(
                                   initialCountryCode: 'SA',
-                                  disableLengthCheck: true,
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
+                                  keyboardType: TextInputType.phone,
+                                  // ✅ NEW: prevent letters/symbols (digits only)
+                                  inputFormatters:  [
                                     FilteringTextInputFormatter.digitsOnly,
                                   ],
                                   cursorColor: Colors.white,
@@ -397,6 +399,7 @@ class _SignupPageState extends State<SignupPage> {
                                   ),
                                   onChanged: (phone) {
                                     _fullPhone = phone.completeNumber;
+                                    _isPhoneValid = phone.isValidNumber();
                                   },
                                 ),
                               ),
