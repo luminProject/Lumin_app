@@ -4,11 +4,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.supabase_client import supabase
-from app.core.SmartEnergyFacade import SmartEnergyFacade  # انتبهي للاسم/المسار
+from app.core.lumin_facade import LuminFacade  # updated to use LuminFacade
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
-facade = SmartEnergyFacade(supabase)
+facade = LuminFacade(supabase)
 
 
 class ProfileOut(BaseModel):

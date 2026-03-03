@@ -6,7 +6,7 @@ import os
 import uuid
 from dotenv import load_dotenv
 from app.routes import router as profile_router
-from app.core.SmartEnergyFacade import SmartEnergyFacade
+from app.core.lumin_facade import LuminFacade
 
 import supabase as supabase_
 
@@ -19,7 +19,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY in .env")
 
 supabase = supabase_.create_client(SUPABASE_URL, SUPABASE_KEY)
-facade = SmartEnergyFacade(supabase)
+facade = LuminFacade(supabase)
 
 app = FastAPI(title="LUMIN Backend")
 
@@ -105,6 +105,7 @@ def get_devices(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @app.post("/devices/{user_id}")
 def add_device(user_id: str, device: DeviceCreate):
     try:
@@ -112,6 +113,23 @@ def add_device(user_id: str, device: DeviceCreate):
         return {"status": "success", "data": res}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# New DELETE endpoint for deleting a device
+@app.delete("/devices/{device_id}")
+def delete_device(device_id: int):
+    try:
+        return {
+            "status": "success",
+            "data": facade.delete_device(device_id)
+        }
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Device not found":
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/bill/{user_id}")
