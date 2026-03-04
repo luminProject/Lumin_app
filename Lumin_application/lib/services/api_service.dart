@@ -1,20 +1,57 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// ApiService handles all HTTP requests to the FastAPI backend.
+///
+/// Important:
+/// - Backend baseUrl changes depending on platform:
+///   - Web:        http://127.0.0.1:8000
+///   - Android emu http://10.0.2.2:8000
+///
+/// Auth:
+/// - Profile endpoints are protected.
+/// - We send Supabase session access token in:
+///     Authorization: Bearer <token>
 class ApiService {
-  // 🔴 ملاحظة: إذا كنتِ تختبرين على محاكي أندرويد استخدمي 10.0.2.2 بدلاً من 127.0.0.1
-  // وإذا كان iOS Simulator أو Web استخدمي 127.0.0.1
-  static const String baseUrl = 'http://10.0.2.2:8000'; 
+  /// Base URL for backend depending on current platform.
+  static String get baseUrl =>
+      kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
 
-  // دالة مساعدة لجلب الـ ID الخاص بالمستخدم الحالي من Supabase
+  // ===== Helpers =====
+
+  /// Returns current Supabase user id.
+  /// Throws if user is not logged in.
   String get _userId {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) throw Exception('User not logged in');
     return user.id;
   }
 
-  // 1. جلب الأجهزة
+  /// Returns current Supabase access token.
+  /// Throws if there is no active session.
+  String get _accessToken {
+    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    if (token == null) throw Exception('No access token');
+    return token;
+  }
+
+  /// Returns headers including authorization.
+  ///
+  /// If [json] is true, it also sets Content-Type to application/json.
+  Map<String, String> authHeaders({bool json = false}) {
+    final headers = <String, String>{
+      'Authorization': 'Bearer $_accessToken',
+      'accept': 'application/json',
+    };
+    if (json) headers['Content-Type'] = 'application/json';
+    return headers;
+  }
+
+  // ===== Existing endpoints (as in your file) =====
+
+  /// GET /devices/{userId}
   Future<List<dynamic>> getDevices() async {
     final response = await http.get(Uri.parse('$baseUrl/devices/$_userId'));
     if (response.statusCode == 200) {
@@ -25,14 +62,11 @@ class ApiService {
     }
   }
 
-  // 2. جلب الفاتورة
+  /// GET /bill/{userId}?bill_limit=...
   Future<Map<String, dynamic>> getBill({double? billLimit}) async {
-    // إذا كان هناك limit نمرره كـ Query Parameter
     String url = '$baseUrl/bill/$_userId';
-    if (billLimit != null) {
-      url += '?bill_limit=$billLimit';
-    }
-    
+    if (billLimit != null) url += '?bill_limit=$billLimit';
+
     final response = await http.get(Uri.parse(url));
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(response.body);
@@ -42,7 +76,7 @@ class ApiService {
     }
   }
 
-  // 3. جلب بيانات الطاقة والإحصائيات
+  /// GET /energy/{userId}
   Future<Map<String, dynamic>> getEnergyStats() async {
     final response = await http.get(Uri.parse('$baseUrl/energy/$_userId'));
     if (response.statusCode == 200) {
@@ -53,9 +87,10 @@ class ApiService {
     }
   }
 
-  // 4. جلب توقعات الطاقة الشمسية
+  /// GET /solar-forecast/{userId}
   Future<Map<String, dynamic>> getSolarForecast() async {
-    final response = await http.get(Uri.parse('$baseUrl/solar-forecast/$_userId'));
+    final response =
+        await http.get(Uri.parse('$baseUrl/solar-forecast/$_userId'));
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'];
@@ -64,14 +99,59 @@ class ApiService {
     }
   }
 
-  // 5. جلب التوصيات
+  /// GET /recommendations/{userId}
   Future<List<dynamic>> getRecommendations() async {
-    final response = await http.get(Uri.parse('$baseUrl/recommendations/$_userId'));
+    final response =
+        await http.get(Uri.parse('$baseUrl/recommendations/$_userId'));
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'] ?? [];
     } else {
       throw Exception('Failed to load recommendations');
     }
+  }
+
+  // ===== Profile endpoints (Protected) =====
+
+  /// GET /profiles/{userId}
+  ///
+  /// Requires Authorization Bearer token.
+  Future<Map<String, dynamic>> getProfile(String userId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/profiles/$userId'),
+      headers: authHeaders(),
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('GET ${res.statusCode}: ${res.body}');
+    }
+
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// PATCH /profiles/{userId}
+  ///
+  /// Requires Authorization Bearer token.
+  /// [payload] must match backend accepted fields (username, phone_number, etc).
+  Future<void> updateProfile(String userId, Map<String, dynamic> payload) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/profiles/$userId'),
+      headers: authHeaders(json: true),
+      body: jsonEncode(payload),
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('PATCH ${res.statusCode}: ${res.body}');
+    }
+  }
+
+  /// Convenience wrapper to update only the avatar_url.
+  ///
+  /// Flow:
+  /// 1) Upload image to Supabase Storage
+  /// 2) Get public URL
+  /// 3) Call this endpoint to save avatar_url in backend DB.
+  Future<void> updateAvatarUrl(String userId, String avatarUrl) async {
+    await updateProfile(userId, {'avatar_url': avatarUrl});
   }
 }

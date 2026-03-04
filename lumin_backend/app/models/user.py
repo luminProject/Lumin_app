@@ -1,87 +1,73 @@
-from typing import Optional
+"""
+User Domain Model
+
+Represents a user profile inside the LUMIN system.
+Responsible for retrieving and updating user data
+from the Supabase database.
+"""
+
+from typing import Any, Dict, Optional
 from pydantic import BaseModel
+from supabase import Client
 
 
 class User(BaseModel):
+    """
+    User entity used in the application domain.
+    """
+
     user_id: str
     username: str = ""
-    password: Optional[str] = None
     phone_number: str = ""
     location: str = ""
     avatar_url: Optional[str] = None
 
-    # --------------------------
-    # OOP: تحميل البيانات داخل الكائن
-    # --------------------------
+    energy_source: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
-    def get_profile(self, supabase) -> None:
-        res = (
-            supabase.table("users")
-            .select("user_id, username, phone_number, location, avatar_url")
-            .eq("user_id", self.user_id)
+
+    def to_dict(self) -> dict:
+        """
+        Convert User object into dictionary format
+        suitable for API responses.
+        """
+        return self.dict()
+
+
+    @staticmethod
+    def get_profile(db: Client, user_id: str) -> "User":
+        """
+        Retrieve a user's profile from the database.
+        """
+
+        resp = (
+            db.table("users")
+            .select("*")
+            .eq("user_id", user_id)
             .limit(1)
             .execute()
         )
 
-        if getattr(res, "error", None):
-            raise ValueError(str(res.error))
+        rows = resp.data or []
 
-        rows = res.data or []
         if not rows:
-            return  # يبقى الكائن بالقيم الافتراضية
+            raise ValueError("Profile not found")
 
-        row = rows[0]
+        return User(**rows[0])
 
-        # نخزن القيم داخل المتغيرات
-        self.username = row.get("username") or ""
-        self.phone_number = row.get("phone_number") or ""
-        self.location = row.get("location") or ""
-        self.avatar_url = row.get("avatar_url")
 
-    # --------------------------
-    # OOP: تحديث القيم داخل الكائن
-    # --------------------------
+    @staticmethod
+    def update_profile(db: Client, user_id: str, info: Dict[str, Any]) -> "User":
+        """
+        Update user profile information.
+        """
 
-    def update_profile(self, supabase, data: dict) -> None:
-        if "username" in data:
-            self.username = data["username"]
+        info.pop("user_id", None)
 
-        if "phone_number" in data:
-            self.phone_number = data["phone_number"]
+        if not info:
+            return User.get_profile(db, user_id)
 
-        if "location" in data:
-            self.location = data["location"]
+        db.table("users").update(info).eq("user_id", user_id).execute()
 
-        if "avatar_url" in data:
-            self.avatar_url = data["avatar_url"]
-
-        # حفظ في الداتابيس
-        payload = {
-            "username": self.username,
-            "phone_number": self.phone_number,
-            "location": self.location,
-            "avatar_url": self.avatar_url,
-        }
-
-        res = (
-            supabase.table("users")
-            .update(payload)
-            .eq("user_id", self.user_id)
-            .execute()
-        )
-
-        if getattr(res, "error", None):
-            raise ValueError(str(res.error))
-
-    # --------------------------
-    # تحويل للاستجابة
-    # --------------------------
-
-    def to_dict(self) -> dict:
-        return {
-            "user_id": self.user_id,
-            "username": self.username,
-            "phone_number": self.phone_number,
-            "location": self.location,
-            "avatar_url": self.avatar_url,
-        }
+        return User.get_profile(db, user_id)
