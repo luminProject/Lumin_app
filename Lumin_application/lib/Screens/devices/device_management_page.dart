@@ -46,6 +46,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
       
       final List<DeviceItem> fetchedDevices = data.map<DeviceItem>((json) {
         return DeviceItem(
+          deviceId: json['device_id'],
           name: json['device_name'] ?? 'Unknown Device',
           value: json['device_type'] ?? 'Unknown',
           connected: true, // افتراضي لأن الباك إند حالياً لا يرسل حالة الاتصال
@@ -116,8 +117,18 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     if (result != true) return;
     if (!mounted) return;
 
-    // TODO: مستقبلاً يمكنك إضافة كود API هنا لحذف الجهاز من قاعدة البيانات
-    setState(() => _devices.remove(d));
+    try {
+      await _apiService.deleteDevice(d.deviceId);
+      setState(() => _devices.remove(d));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error deleting device'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -155,26 +166,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
         ),
 
         // ✅ 5. عرض الواجهة بناءً على حالة التحميل
-        body: _isLoading 
-            ? const Center(child: CircularProgressIndicator(color: AppColors.mint))
-            : _errorMessage != null
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.error_outline, color: Colors.white54, size: 48),
-                        const SizedBox(height: 16),
-                        Text('Failed to load devices\n$_errorMessage', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: _fetchDevicesFromApi,
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.button),
-                          child: const Text('Try Again'),
-                        )
-                      ],
-                    ),
-                  )
-                : SafeArea(
+        body: SafeArea(
           // ✅ 6. تغليف القائمة بـ RefreshIndicator لتمكين السحب للتحديث
           child: RefreshIndicator(
             onRefresh: _fetchDevicesFromApi,
@@ -188,6 +180,37 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 52), // compensate transparent appbar
+                  if (_isLoading)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: Center(
+                        child: CircularProgressIndicator(color: AppColors.mint),
+                      ),
+                    ),
+                  if (_errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: GlassCard(
+                        radius: 18,
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.redAccent),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Failed to load devices',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _fetchDevicesFromApi,
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
 
                   // ===== Stats =====
                   GlassCard(
@@ -331,12 +354,14 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
 }
 
 class DeviceItem {
+  final int deviceId;
   final String name;
   final String value;
   final bool connected;
   final bool running;
 
   const DeviceItem({
+    required this.deviceId,
     required this.name,
     required this.value,
     required this.connected,

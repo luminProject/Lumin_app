@@ -3,15 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:lumin_application/Widgets/gradient_background.dart';
 import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/theme/app_colors.dart';
-import 'package:lumin_application/Screens/devices/device_success_page.dart';
 
 class DeviceSetupPage extends StatefulWidget {
   final String deviceId;
 
-  const DeviceSetupPage({
-    super.key,
-    required this.deviceId,
-  });
+  const DeviceSetupPage({super.key, required this.deviceId});
 
   @override
   State<DeviceSetupPage> createState() => _DeviceSetupPageState();
@@ -19,17 +15,20 @@ class DeviceSetupPage extends StatefulWidget {
 
 class _DeviceSetupPageState extends State<DeviceSetupPage> {
   final TextEditingController _nameCtrl = TextEditingController();
+  final TextEditingController _capacityCtrl = TextEditingController();
 
   final List<String> _rooms = ['Living Room', 'Kitchen', 'Bedroom', 'Bathroom'];
+
   String? _selectedRoom;
+  String _deviceType = 'consumption';
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _capacityCtrl.dispose();
     super.dispose();
   }
 
-  // نفس ستايل حق input في اللوقن (تقريبًا) بدون GlassCard
   InputDecoration _inputDecoration({
     required String hint,
     Widget? prefixIcon,
@@ -37,7 +36,10 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: Colors.white.withOpacity(0.45), fontWeight: FontWeight.w700),
+      hintStyle: TextStyle(
+        color: Colors.white.withOpacity(0.45),
+        fontWeight: FontWeight.w700,
+      ),
       prefixIcon: prefixIcon,
       suffixIcon: suffixIcon,
       filled: true,
@@ -53,12 +55,14 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: AppColors.mint.withOpacity(0.60), width: 1.2),
+        borderSide: BorderSide(
+          color: AppColors.mint.withOpacity(0.60),
+          width: 1.2,
+        ),
       ),
     );
   }
 
-  // ✅ Glass dialog (بدل AlertDialog)
   Future<void> _addRoomDialog() async {
     final ctrl = TextEditingController();
 
@@ -76,10 +80,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _GlassTextField(
-                  controller: ctrl,
-                  hintText: 'e.g., Office',
-                ),
+                _GlassTextField(controller: ctrl, hintText: 'e.g., Office'),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -126,21 +127,27 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
     }
   }
 
-void _finishSetup() {
-  final deviceName = _nameCtrl.text.trim().isEmpty ? widget.deviceId : _nameCtrl.text.trim();
+  void _finishSetup() {
+    final bool isSolarPanel = _deviceType == 'production';
+    final deviceName = _nameCtrl.text.trim().isEmpty
+        ? widget.deviceId
+        : _nameCtrl.text.trim();
 
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => DeviceSuccessPage(deviceName: deviceName),
-    ),
-  );
-}
-
+    Navigator.pop(context, {
+      "device_name": deviceName,
+      "device_type": _deviceType,
+      "room": _deviceType == 'production' ? null : _selectedRoom,
+      "panel_capacity": isSolarPanel ? _capacityCtrl.text.trim() : null,
+      "created_at": DateTime.now().toIso8601String(),
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final canFinish = (_selectedRoom != null) && _nameCtrl.text.trim().isNotEmpty;
+    final bool isSolarPanel = _deviceType == 'production';
+    final canFinish = _deviceType == 'production'
+        ? _nameCtrl.text.trim().isNotEmpty
+        : (_selectedRoom != null && _nameCtrl.text.trim().isNotEmpty);
 
     return GradientBackground(
       child: Scaffold(
@@ -151,10 +158,16 @@ void _finishSetup() {
           backgroundColor: Colors.transparent,
           elevation: 0,
           centerTitle: true,
-          title: const Text('Device Setup', style: TextStyle(fontWeight: FontWeight.w900)),
+          title: const Text(
+            'Device Setup',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
           leading: IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white,
+            ),
           ),
         ),
         body: SafeArea(
@@ -165,10 +178,12 @@ void _finishSetup() {
               children: [
                 const SizedBox(height: 52),
 
-                // ===== Selected device card =====
                 GlassCard(
                   radius: 18,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
                   child: Row(
                     children: [
                       Container(
@@ -179,7 +194,11 @@ void _finishSetup() {
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(color: Colors.white12),
                         ),
-                        child: const Icon(Icons.link_rounded, color: AppColors.mint, size: 22),
+                        child: const Icon(
+                          Icons.link_rounded,
+                          color: AppColors.mint,
+                          size: 22,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -212,7 +231,89 @@ void _finishSetup() {
 
                 const SizedBox(height: 18),
 
-                // ===== Choose room =====
+                const Text(
+                  'Device type',
+                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Choose whether this device consumes energy or produces it.',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.65),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () =>
+                            setState(() => _deviceType = 'consumption'),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: _deviceType == 'consumption'
+                                ? AppColors.button.withOpacity(0.18)
+                                : Colors.white.withOpacity(0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _deviceType == 'consumption'
+                                  ? AppColors.mint.withOpacity(0.70)
+                                  : Colors.white.withOpacity(0.10),
+                            ),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'Consumption',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setState(() => _deviceType = 'production'),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: _deviceType == 'production'
+                                ? AppColors.button.withOpacity(0.18)
+                                : Colors.white.withOpacity(0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _deviceType == 'production'
+                                  ? AppColors.mint.withOpacity(0.70)
+                                  : Colors.white.withOpacity(0.10),
+                            ),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'Production',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 18),
+
                 const Text(
                   'Choose a room',
                   style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900),
@@ -229,10 +330,8 @@ void _finishSetup() {
                 ),
                 const SizedBox(height: 10),
 
-                // ===== Choose room field (NO GlassCard behind it) =====
                 Row(
                   children: [
-                    // Add room button (left)
                     SizedBox(
                       width: 46,
                       height: 46,
@@ -245,21 +344,26 @@ void _finishSetup() {
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: Colors.white12),
                           ),
-                          child: const Icon(Icons.add_rounded, color: Colors.white70),
+                          child: const Icon(
+                            Icons.add_rounded,
+                            color: Colors.white70,
+                          ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 10),
-
-                    // Dropdown field (login vibe)
                     Expanded(
                       child: Container(
                         height: 46,
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.04),
+                          color: _deviceType == 'production'
+                              ? Colors.white.withOpacity(0.02)
+                              : Colors.white.withOpacity(0.04),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.white.withOpacity(0.10)),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.10),
+                          ),
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
@@ -268,7 +372,10 @@ void _finishSetup() {
                             elevation: 0,
                             dropdownColor: const Color(0xFF071821),
                             borderRadius: BorderRadius.circular(14),
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70),
+                            icon: const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Colors.white70,
+                            ),
                             hint: Text(
                               'Select from list',
                               style: TextStyle(
@@ -281,11 +388,18 @@ void _finishSetup() {
                                 value: r,
                                 child: Text(
                                   r,
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                               );
                             }).toList(),
-                            onChanged: (v) => setState(() => _selectedRoom = v),
+                            onChanged: _deviceType == 'production'
+                                ? null
+                                : (v) => setState(() {
+                                    _selectedRoom = v;
+                                  }),
                           ),
                         ),
                       ),
@@ -295,14 +409,46 @@ void _finishSetup() {
 
                 const SizedBox(height: 18),
 
-                // ===== Device name =====
+                if (isSolarPanel) ...[
+                  const Text(
+                    'Panel capacity',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Enter the power capacity of the solar panel.',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.65),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _capacityCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    decoration: _inputDecoration(hint: 'Example: 500'),
+                  ),
+                  const SizedBox(height: 18),
+                ],
+
                 const Text(
                   'Device name',
                   style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Give it a clear name so it is easy to recognize later.',
+                  isSolarPanel
+                      ? 'Please enter a name for the solar panel device.'
+                      : 'Please enter a device name for consumption devices.',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.65),
                     fontSize: 12.5,
@@ -315,13 +461,19 @@ void _finishSetup() {
                 TextField(
                   controller: _nameCtrl,
                   onChanged: (_) => setState(() {}),
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
-                  decoration: _inputDecoration(hint: 'Example: Living Room AC'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  decoration: _inputDecoration(
+                    hint: isSolarPanel
+                        ? 'Example: Solar Panel 1'
+                        : 'Example: Living Room AC',
+                  ),
                 ),
 
                 const SizedBox(height: 18),
 
-                // ===== Buttons =====
                 SizedBox(
                   width: double.infinity,
                   height: 54,
@@ -329,13 +481,20 @@ void _finishSetup() {
                     onPressed: canFinish ? _finishSetup : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.button,
-                      disabledBackgroundColor: AppColors.button.withOpacity(0.28),
+                      disabledBackgroundColor: AppColors.button.withOpacity(
+                        0.28,
+                      ),
                       elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
                     child: const Text(
                       'Finish setup',
-                      style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w900),
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                 ),
@@ -347,7 +506,9 @@ void _finishSetup() {
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(color: Colors.white.withOpacity(0.18)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       backgroundColor: Colors.white.withOpacity(0.04),
                     ),
                     child: Text(
@@ -377,14 +538,11 @@ class _GlassDialog extends StatelessWidget {
   final String title;
   final Widget child;
 
-  const _GlassDialog({
-    required this.title,
-    required this.child,
-  });
+  const _GlassDialog({required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Material( // ✅ مهم: يعطي Material ancestor للـ TextField وغيره
+    return Material(
       type: MaterialType.transparency,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -429,10 +587,7 @@ class _GlassTextField extends StatelessWidget {
   final TextEditingController controller;
   final String hintText;
 
-  const _GlassTextField({
-    required this.controller,
-    required this.hintText,
-  });
+  const _GlassTextField({required this.controller, required this.hintText});
 
   @override
   Widget build(BuildContext context) {
@@ -444,13 +599,19 @@ class _GlassTextField extends StatelessWidget {
       ),
       child: TextField(
         controller: controller,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+        ),
         cursorColor: AppColors.mint,
         decoration: InputDecoration(
           hintText: hintText,
           hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 14,
+          ),
         ),
       ),
     );
@@ -475,9 +636,13 @@ class _GlassButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: filled ? AppColors.button : Colors.white.withOpacity(0.06),
+          backgroundColor: filled
+              ? AppColors.button
+              : Colors.white.withOpacity(0.06),
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           side: filled ? BorderSide.none : BorderSide(color: Colors.white12),
         ),
         child: Text(

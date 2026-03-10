@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:lumin_application/Widgets/gradient_background.dart';
 import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/theme/app_colors.dart';
-
-// ✅ اربطيها بصفحتك الحقيقية
 import 'package:lumin_application/Screens/devices/device_setup_page.dart';
 
 class DeviceSearchPage extends StatefulWidget {
@@ -33,7 +31,6 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
         backgroundColor: Colors.transparent,
         extendBody: true,
         extendBodyBehindAppBar: true,
-
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -44,11 +41,13 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
           ),
           leading: IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white,
+            ),
           ),
           actions: const [],
         ),
-
         body: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
@@ -56,7 +55,6 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const SizedBox(height: 52), // compensate transparent appbar
-
                 // ===== Top icon (loading-ish) =====
                 Container(
                   width: 58,
@@ -77,10 +75,7 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
 
                 const Text(
                   'Search completed',
-                  style: TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w900),
                   textAlign: TextAlign.center,
                 ),
 
@@ -117,7 +112,9 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
                     final selected = _selectedIndex == i;
 
                     return Padding(
-                      padding: EdgeInsets.only(bottom: i == _foundDevices.length - 1 ? 0 : 10),
+                      padding: EdgeInsets.only(
+                        bottom: i == _foundDevices.length - 1 ? 0 : 10,
+                      ),
                       child: _SelectableDeviceTile(
                         name: name,
                         selected: selected,
@@ -136,26 +133,37 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
                   child: ElevatedButton(
                     onPressed: _selectedIndex == null
                         ? null
-                        : () {
+                        : () async {
                             final selectedName = _foundDevices[_selectedIndex!];
 
-                            // ✅ يروح مباشرة لصفحة الإعداد (بدون رجوع لصفحة البحث)
-                            Navigator.pushReplacement(
+                            final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => DeviceSetupPage(deviceId: selectedName),
+                                builder: (_) =>
+                                    DeviceSetupPage(deviceId: selectedName),
                               ),
                             );
+
+                            if (!mounted) return;
+
+                            if (result != null) {
+                              Navigator.pop(context, result);
+                            }
                           },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.button,
                       disabledBackgroundColor: Colors.white10,
                       elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
                     child: const Text(
                       'Continue',
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15.5,
+                      ),
                     ),
                   ),
                 ),
@@ -169,7 +177,9 @@ class _DeviceSearchPageState extends State<DeviceSearchPage> {
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(color: Colors.white.withOpacity(0.18)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       backgroundColor: Colors.white.withOpacity(0.04),
                     ),
                     child: Text(
@@ -220,7 +230,9 @@ class _SelectableDeviceTile extends StatelessWidget {
               width: 38,
               height: 38,
               decoration: BoxDecoration(
-                color: selected ? AppColors.mint.withOpacity(0.22) : Colors.white10,
+                color: selected
+                    ? AppColors.mint.withOpacity(0.22)
+                    : Colors.white10,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Colors.white12),
               ),
@@ -287,10 +299,12 @@ class _SpinningIcon extends StatefulWidget {
   State<_SpinningIcon> createState() => _SpinningIconState();
 }
 
-class _SpinningIconState extends State<_SpinningIcon> with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
-        ..repeat();
+class _SpinningIconState extends State<_SpinningIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
 
   @override
   void dispose() {

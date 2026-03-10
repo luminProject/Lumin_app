@@ -17,6 +17,7 @@ class DeviceCard extends StatelessWidget {
 
   final VoidCallback? onSettings;
   final VoidCallback? onDelete;
+  final VoidCallback? onReconnect;
 
   const DeviceCard({
     super.key,
@@ -29,6 +30,7 @@ class DeviceCard extends StatelessWidget {
     this.onLink,
     this.onSettings,
     this.onDelete,
+    this.onReconnect,
   });
 
   void _openMenuSheet(BuildContext context) {
@@ -74,7 +76,8 @@ class DeviceCard extends StatelessWidget {
         final rowGap = (isHomeTight ? 4.0 : (fullWidth ? 10.0 : 7.0)) * scale;
         final titleGap = (isHomeTight ? 4.0 : (fullWidth ? 10.0 : 7.0)) * scale;
 
-        final waveHeight = (fullWidth ? 34.0 : (isHomeTight ? 16.0 : 22.0)) * scale;
+        final waveHeight =
+            (fullWidth ? 34.0 : (isHomeTight ? 16.0 : 22.0)) * scale;
         final statusHeight = fullWidth ? (16.0 * scale) : 0.0;
 
         final valueFont = (isHomeTight ? 12.5 : 14.0) * scale;
@@ -90,7 +93,9 @@ class DeviceCard extends StatelessWidget {
                   width: icon,
                   height: icon,
                   decoration: BoxDecoration(
-                    color: active ? AppColors.mint.withOpacity(0.18) : Colors.white10,
+                    color: active
+                        ? AppColors.mint.withOpacity(0.18)
+                        : Colors.white10,
                     borderRadius: BorderRadius.circular(12 * scale),
                   ),
                   child: Icon(Icons.link, color: accent, size: 18 * scale),
@@ -108,7 +113,11 @@ class DeviceCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12 * scale),
                 child: Padding(
                   padding: EdgeInsets.all((isHomeTight ? 4 : 6) * scale),
-                  child: Icon(Icons.more_horiz, color: Colors.white54, size: 22 * scale),
+                  child: Icon(
+                    Icons.more_horiz,
+                    color: Colors.white54,
+                    size: 22 * scale,
+                  ),
                 ),
               ),
             ],
@@ -147,7 +156,11 @@ class DeviceCard extends StatelessWidget {
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerRight,
               child: Text(
-                value,
+                value == 'consumption'
+                    ? '0 kW'
+                    : value == 'production'
+                    ? '0 kW'
+                    : value,
                 style: TextStyle(
                   fontSize: valueFont,
                   fontWeight: FontWeight.w800,
@@ -174,7 +187,10 @@ class DeviceCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: TextStyle(fontSize: 14 * scale, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 14 * scale,
+                        fontWeight: FontWeight.w700,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -200,7 +216,10 @@ class DeviceCard extends StatelessWidget {
 
               Text(
                 title,
-                style: TextStyle(fontSize: 14 * scale, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontSize: 14 * scale,
+                  fontWeight: FontWeight.w700,
+                ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -211,19 +230,62 @@ class DeviceCard extends StatelessWidget {
               SizedBox(height: 8 * scale),
 
               SizedBox(
-                height: statusHeight,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    active ? (running ? 'Connected • Running' : 'Connected') : 'Disconnected',
-                    style: TextStyle(
-                      fontSize: 11 * scale,
-                      fontWeight: FontWeight.w700,
-                      color: active ? AppColors.mint : Colors.white38,
+                height: statusHeight + (!active ? 12 * scale : 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          active
+                              ? (running ? 'Connected • Running' : 'Connected')
+                              : 'Disconnected',
+                          style: TextStyle(
+                            fontSize: 11 * scale,
+                            fontWeight: FontWeight.w700,
+                            color: active ? AppColors.mint : Colors.white38,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                    if (!active)
+                      InkWell(
+                        onTap: onReconnect,
+                        borderRadius: BorderRadius.circular(12 * scale),
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 10 * scale,
+                            vertical: 5 * scale,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(12 * scale),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.refresh_rounded,
+                                size: 14 * scale,
+                                color: Colors.white70,
+                              ),
+                              SizedBox(width: 4 * scale),
+                              Text(
+                                'Reconnect',
+                                style: TextStyle(
+                                  fontSize: 10.5 * scale,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
 
@@ -240,7 +302,8 @@ class DeviceCard extends StatelessWidget {
         return GlassCard(
           radius: 20,
           padding: EdgeInsets.all(pad),
-          child: ClipRect( // ✅ يمنع أي بكسلات زيادة تسبب تحذير
+          child: ClipRect(
+            // ✅ يمنع أي بكسلات زيادة تسبب تحذير
             child: child,
           ),
         );
@@ -323,7 +386,10 @@ class _GlassMenuSheet extends StatelessWidget {
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Divider(color: Colors.white.withOpacity(0.12), height: 18),
+                      child: Divider(
+                        color: Colors.white.withOpacity(0.12),
+                        height: 18,
+                      ),
                     ),
                     _menuTile(
                       icon: Icons.delete_rounded,
@@ -373,7 +439,10 @@ class _GlassMenuSheet extends StatelessWidget {
               Expanded(
                 child: Text(
                   text,
-                  style: TextStyle(color: textColor, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
               if (trailing != null)
