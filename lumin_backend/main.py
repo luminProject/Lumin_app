@@ -51,6 +51,7 @@ class SensorReadingIn(BaseModel):
 class DeviceCreate(BaseModel):
     name: str
     device_type: str
+    panel_capacity: float | None = None
 
 
 @app.get("/")
@@ -109,7 +110,12 @@ def get_devices(user_id: str):
 @app.post("/devices/{user_id}")
 def add_device(user_id: str, device: DeviceCreate):
     try:
-        res = facade.add_new_device(user_id, device.name, device.device_type)
+        res = facade.add_new_device(
+            user_id,
+            device.name,
+            device.device_type,
+            device.panel_capacity,
+        )
         return {"status": "success", "data": res}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

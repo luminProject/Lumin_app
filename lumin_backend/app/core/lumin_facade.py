@@ -123,17 +123,18 @@ class LuminFacade:
     # -----------------------------
     # DEVICE MANAGEMENT (DeviceFactory & Device Classes)
     # -----------------------------
-    def add_new_device(self, user_id: str, name: str, device_type: str) -> Dict[str, Any]:
+    def add_new_device(self, user_id: str, name: str, device_type: str, panel_capacity: float | None = None) -> Dict[str, Any]:
         """
         إضافة جهاز جديد (سواء كان جهاز استهلاك ConsumptionDevice أو إنتاج ProductionDevice)
         """
         res = (
-            supabase
+            self.supabase
             .table("device")
             .insert({
                 "user_id": user_id,
                 "device_name": name,
-                "device_type": device_type # e.g., 'consumption' or 'production'
+                "device_type": device_type,  # e.g., 'consumption' or 'production'
+                "panel_capacity": panel_capacity,
             })
             .execute()
         )
@@ -141,7 +142,7 @@ class LuminFacade:
 
     def view_devices(self, user_id: str) -> List[Dict[str, Any]]:
         res = (
-            supabase
+            self.supabase
             .table("device")
             .select("*")
             .eq("user_id", user_id)
@@ -152,7 +153,7 @@ class LuminFacade:
     def delete_device(self, device_id: int) -> Dict[str, Any]:
         """Delete a device by device_id (used by DELETE /devices/{device_id})."""
         res = (
-            supabase
+            self.supabase
             .table("device")
             .delete()
             .eq("device_id", int(device_id))
