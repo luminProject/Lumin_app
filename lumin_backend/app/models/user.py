@@ -1,87 +1,64 @@
-from typing import Optional
+from typing import Any, Dict, Optional
 from pydantic import BaseModel
+from supabase import Client
 
 
 class User(BaseModel):
     user_id: str
     username: str = ""
-    password: Optional[str] = None
     phone_number: str = ""
-    location: str = ""
+    location: Optional[str] = None
     avatar_url: Optional[str] = None
+    energy_source: Optional[str] = "Grid only"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
-    # --------------------------
-    # OOP: تحميل البيانات داخل الكائن
-    # --------------------------
+    def to_dict(self) -> dict:
+        return self.dict()
 
-    def get_profile(self, supabase) -> None:
-        res = (
-            supabase.table("users")
-            .select("user_id, username, phone_number, location, avatar_url")
-            .eq("user_id", self.user_id)
+    @staticmethod
+    def get_profile(db: Client, user_id: str) -> "User":
+        resp = (
+            db.table("users")
+            .select("*")
+            .eq("user_id", user_id)
             .limit(1)
             .execute()
         )
 
-        if getattr(res, "error", None):
-            raise ValueError(str(res.error))
+        rows = resp.data or []
 
-        rows = res.data or []
-        if not rows:
-            return  # يبقى الكائن بالقيم الافتراضية
+        if rows:
+            return User(**rows[0])
 
-        row = rows[0]
-
-        # نخزن القيم داخل المتغيرات
-        self.username = row.get("username") or ""
-        self.phone_number = row.get("phone_number") or ""
-        self.location = row.get("location") or ""
-        self.avatar_url = row.get("avatar_url")
-
-    # --------------------------
-    # OOP: تحديث القيم داخل الكائن
-    # --------------------------
-
-    def update_profile(self, supabase, data: dict) -> None:
-        if "username" in data:
-            self.username = data["username"]
-
-        if "phone_number" in data:
-            self.phone_number = data["phone_number"]
-
-        if "location" in data:
-            self.location = data["location"]
-
-        if "avatar_url" in data:
-            self.avatar_url = data["avatar_url"]
-
-        # حفظ في الداتابيس
-        payload = {
-            "username": self.username,
-            "phone_number": self.phone_number,
-            "location": self.location,
-            "avatar_url": self.avatar_url,
+        new_row = {
+            "user_id": user_id,
+            "username": "",
+            "phone_number": "",
+            "location": None,
+            "avatar_url": None,
+            "energy_source": "Grid only",
+            "latitude": None,
+            "longitude": None,
         }
 
-        res = (
-            supabase.table("users")
-            .update(payload)
-            .eq("user_id", self.user_id)
-            .execute()
-        )
+        insert_resp = db.table("users").insert(new_row).execute()
+        inserted_rows = insert_resp.data or []
 
-        if getattr(res, "error", None):
-            raise ValueError(str(res.error))
+        if not inserted_rows:
+            raise ValueError("Failed to create profile")
 
-    # --------------------------
-    # تحويل للاستجابة
-    # --------------------------
+        return User(**inserted_rows[0])
 
-    def to_dict(self) -> dict:
-        return {
-            "user_id": self.user_id,
-            "username": self.username,
-            "phone_number": self.phone_number,
-            "location": self.location,
-            "avatar_url": self.avatar_url,
-        }
+    @staticmethod
+    def update_profile(db: Client, user_id: str, info: Dict[str, Any]) -> "User":
+        info.pop("user_id", None)
+
+        User.get_profile(db, user_id)
+
+        if not info:
+            return User.get_profile(db, user_id)
+
+        db.table("users").update(info).eq("user_id", user_id).execute()
+
+        return User.get_profile(db, user_id)

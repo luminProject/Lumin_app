@@ -98,28 +98,13 @@ class LuminFacade:
     # -----------------------------
     # PROFILE (for Shrooq page)
     # -----------------------------
-    def get_profile(self, *, user_id: str) -> Dict[str, Any]:
-        user = User(user_id=user_id)
-        user.get_profile(self.supabase)
+    def get_profile(self, user_id: str) -> dict:
+        user = User.get_profile(self.supabase, user_id)
         return user.to_dict()
 
-    def update_profile(self, *, user_id: str, info: Dict[str, Any]) -> Dict[str, Any]:
-        """Update only allowed profile fields then return updated profile."""
-        allowed = {"username", "phone_number", "location", "avatar_url"}
-        payload = {k: v for k, v in (info or {}).items() if k in allowed and v is not None}
-
-        if payload:
-            res = (
-                self.supabase.table("users")
-                .update(payload)
-                .eq("user_id", user_id)
-                .execute()
-            )
-            if getattr(res, "error", None):
-                raise ValueError(str(res.error))
-
-        return self.get_profile(user_id=user_id)
-
+    def update_profile(self, user_id: str, info: Dict[str, Any]) -> dict:
+        user = User.update_profile(self.supabase, user_id, info)
+        return user.to_dict()
     # -----------------------------
     # DEVICE MANAGEMENT (DeviceFactory & Device Classes)
     # -----------------------------
@@ -300,5 +285,4 @@ class LuminFacade:
             .execute()
         )
         return res.data or []
-    
-# هذي الي جبتها من كلاس facede الثاني
+  

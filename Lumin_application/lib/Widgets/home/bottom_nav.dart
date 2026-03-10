@@ -132,7 +132,7 @@ class HomeBottomNav extends StatelessWidget {
             ),
             Expanded(
               child: _navItem(
-                icon: Icons.person_rounded,
+                icon: Icons.settings_rounded,
                 active: currentIndex == 4,
                 onTap: () {
                   if (currentIndex != 4) _goTo(context, const ProfileSettingsPage(), 4);
