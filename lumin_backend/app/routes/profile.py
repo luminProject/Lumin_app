@@ -17,6 +17,7 @@ class ProfileOut(BaseModel):
     location: Optional[str] = None
     avatar_url: Optional[str] = None
     energy_source: Optional[str] = None
+    has_solar_panels: Optional[bool] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
@@ -27,6 +28,7 @@ class ProfileUpdate(BaseModel):
     location: Optional[str] = None
     avatar_url: Optional[str] = None
     energy_source: Optional[str] = Field(default=None, description="Grid only or Grid + Solar")
+    has_solar_panels: Optional[bool] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
@@ -63,7 +65,6 @@ def get_profile(user_id: str, authorization: Optional[str] = Header(default=None
     if uid != user_id:
         raise HTTPException(403, detail="Forbidden")
 
-    # Use admin client here so backend handles auth, not RLS
     facade = LuminFacade(supabase_admin)
 
     try:
@@ -88,6 +89,9 @@ def update_profile(
 
     facade = LuminFacade(supabase_admin)
     info = payload.model_dump(exclude_none=True)
+
+    if info.get("energy_source") == "Grid only":
+        info["has_solar_panels"] = None
 
     try:
         return facade.update_profile(user_id, info)

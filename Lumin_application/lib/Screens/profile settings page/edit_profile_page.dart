@@ -21,10 +21,11 @@ import 'package:lumin_application/Classes/user_model.dart';
 /// - Update full name
 /// - Update phone number
 /// - Update energy source
+/// - If energy source is Grid + Solar, choose whether the user has solar panels
 /// - Pick and save home location (lat/lng)
 /// - Upload avatar to Supabase Storage and save its public URL via backend API
 ///
-/// Architecture:.
+/// Architecture:
 /// - It calls ApiService methods for backend operations.
 /// - Supabase is used for authentication + storage (avatars bucket).
 class EditProfilePage extends StatefulWidget {
@@ -60,6 +61,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   // ===== Validation errors =====
   String? _phoneError;
+  String? _solarPanelsError;
 
   // ===== Avatar state =====
   final _picker = ImagePicker();
@@ -70,6 +72,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   // ===== Profile fields =====
   String _energySource = 'Grid only';
+  bool? _hasSolarPanels;
   double? _latitude;
   double? _longitude;
 
@@ -174,6 +177,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return null;
   }
 
+  /// Validates solar panels selection only when energy source is Grid + Solar.
+  String? _validateSolarPanels() {
+    if (_energySource == 'Grid + Solar' && _hasSolarPanels == null) {
+      return 'Please choose whether you have solar panels';
+    }
+    return null;
+  }
+
   /// Loads profile data from backend and fills UI controllers/state.
   Future<void> _loadProfile() async {
     final userId = _uid();
@@ -201,6 +212,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
           ? 'Grid only'
           : user.energySource.trim();
 
+      _hasSolarPanels = user.hasSolarPanels;
+
       _latitude = user.latitude;
       _longitude = user.longitude;
 
@@ -213,6 +226,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
 
       _phoneError = null;
+      _solarPanelsError = null;
     } catch (e) {
       _toast('Failed to load profile: $e', success: false);
     } finally {
@@ -221,14 +235,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
   }
 
   /// Saves profile changes to backend.
-  ///
-  /// This does NOT upload avatar. Avatar flow is handled separately.
   Future<void> _saveProfile() async {
     final ok = _formKey.currentState?.validate() ?? false;
     final phoneErr = _validatePhoneLocalDigits(_localPhoneDigits);
-    setState(() => _phoneError = phoneErr);
+    final solarErr = _validateSolarPanels();
 
-    if (!ok || phoneErr != null) {
+    setState(() {
+      _phoneError = phoneErr;
+      _solarPanelsError = solarErr;
+    });
+
+    if (!ok || phoneErr != null || solarErr != null) {
       _toast('Fix the highlighted fields', success: false);
       return;
     }
@@ -247,6 +264,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         username: _nameCtrl.text.trim(),
         phoneNumber: _fullPhone.trim(),
         energySource: _energySource,
+        hasSolarPanels:
+            _energySource == 'Grid + Solar' ? _hasSolarPanels : null,
         latitude: _latitude,
         longitude: _longitude,
         avatarUrl: _avatarUrl,
@@ -272,7 +291,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
       return LatLng(_latitude!, _longitude!);
     }
 
-    // Web usually can provide location if browser permission is granted
     if (kIsWeb) {
       return const LatLng(21.4858, 39.1925);
     }
@@ -635,9 +653,78 @@ class _EditProfilePageState extends State<EditProfilePage> {
                             ],
                             onChanged: (v) {
                               if (v == null) return;
-                              setState(() => _energySource = v);
+                              setState(() {
+                                _energySource = v;
+
+                                if (_energySource != 'Grid + Solar') {
+                                  _hasSolarPanels = null;
+                                  _solarPanelsError = null;
+                                } else {
+                                  _solarPanelsError = _validateSolarPanels();
+                                }
+                              });
                             },
                           ),
+
+                          if (_energySource == 'Grid + Solar') ...[
+                            const SizedBox(height: 16),
+                            _label('Solar Panels'),
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.06),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.10),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Do you have solar panels?',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _solarChoiceCard(
+                                          title: 'Yes',
+                                          value: true,
+                                          icon: Icons.solar_power_rounded,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: _solarChoiceCard(
+                                          title: 'No',
+                                          value: false,
+                                          icon: Icons.power_outlined,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_solarPanelsError != null) ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      _solarPanelsError!,
+                                      style: const TextStyle(
+                                        color: Colors.redAccent,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
 
                           const SizedBox(height: 18),
                           _label('Home Location'),
@@ -913,6 +1000,67 @@ class _EditProfilePageState extends State<EditProfilePage> {
         final err = _validatePhoneLocalDigits(_localPhoneDigits);
         setState(() => _phoneError = err);
       },
+    );
+  }
+
+  Widget _solarChoiceCard({
+    required String title,
+    required bool value,
+    required IconData icon,
+  }) {
+    final isSelected = _hasSolarPanels == value;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        setState(() {
+          _hasSolarPanels = value;
+          _solarPanelsError = null;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.mint.withOpacity(0.18)
+              : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.mint
+                : Colors.white.withOpacity(0.10),
+            width: isSelected ? 1.4 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? AppColors.mint : Colors.white70,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            Icon(
+              isSelected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off,
+              color: isSelected ? AppColors.mint : Colors.white38,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

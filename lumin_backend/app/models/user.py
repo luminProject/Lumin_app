@@ -10,6 +10,7 @@ class User(BaseModel):
     location: Optional[str] = None
     avatar_url: Optional[str] = None
     energy_source: Optional[str] = "Grid only"
+    has_solar_panels: Optional[bool] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
@@ -38,6 +39,7 @@ class User(BaseModel):
             "location": None,
             "avatar_url": None,
             "energy_source": "Grid only",
+            "has_solar_panels": None,
             "latitude": None,
             "longitude": None,
         }
@@ -55,6 +57,11 @@ class User(BaseModel):
         info.pop("user_id", None)
 
         User.get_profile(db, user_id)
+
+        if "energy_source" in info:
+            energy_source = info.get("energy_source")
+            if energy_source == "Grid only":
+                info["has_solar_panels"] = None
 
         if not info:
             return User.get_profile(db, user_id)
