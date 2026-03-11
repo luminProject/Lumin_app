@@ -16,15 +16,10 @@ import 'package:flutter/foundation.dart';
 /// - We send Supabase session access token in:
 ///     Authorization: Bearer <token>
 class ApiService {
-<<<<<<< HEAD
-  // 🔴 ملاحظة: إذا كنتِ تختبرين على محاكي أندرويد استخدمي 10.0.2.2 بدلاً من 127.0.0.1
-  // وإذا كان iOS Simulator أو Web استخدمي 127.0.0.1
-  static const String baseUrl = 'http://127.0.0.1:8000';
-=======
+
+
   /// Base URL for backend depending on current platform.
-  static String get baseUrl =>
-      kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
->>>>>>> 77e737c750dda9fd1497b31c42291480ea702d66
+  static String get baseUrl => kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
 
   // ===== Helpers =====
 
@@ -72,13 +67,13 @@ class ApiService {
   /// GET /bill/{userId}?bill_limit=...
   Future<Map<String, dynamic>> getBill({double? billLimit}) async {
     String url = '$baseUrl/bill/$_userId';
-<<<<<<< HEAD
+
     if (billLimit != null) {
       url += '?bill_limit=$billLimit';
     }
-=======
+
     if (billLimit != null) url += '?bill_limit=$billLimit';
->>>>>>> 77e737c750dda9fd1497b31c42291480ea702d66
+
 
     final response = await http.get(Uri.parse(url));
     if (response.statusCode == 200) {
@@ -102,14 +97,11 @@ class ApiService {
 
   /// GET /solar-forecast/{userId}
   Future<Map<String, dynamic>> getSolarForecast() async {
-<<<<<<< HEAD
+
     final response = await http.get(
       Uri.parse('$baseUrl/solar-forecast/$_userId'),
     );
-=======
-    final response =
-        await http.get(Uri.parse('$baseUrl/solar-forecast/$_userId'));
->>>>>>> 77e737c750dda9fd1497b31c42291480ea702d66
+
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'];
@@ -120,14 +112,12 @@ class ApiService {
 
   /// GET /recommendations/{userId}
   Future<List<dynamic>> getRecommendations() async {
-<<<<<<< HEAD
+
     final response = await http.get(
       Uri.parse('$baseUrl/recommendations/$_userId'),
     );
-=======
-    final response =
-        await http.get(Uri.parse('$baseUrl/recommendations/$_userId'));
->>>>>>> 77e737c750dda9fd1497b31c42291480ea702d66
+
+  
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'] ?? [];
@@ -136,7 +126,7 @@ class ApiService {
     }
   }
 
-<<<<<<< HEAD
+
   // 6. إضافة جهاز
   Future<void> addDevice({
     required String deviceName,
@@ -175,14 +165,14 @@ class ApiService {
       throw Exception('Failed to delete device');
     }
   }
-}
-=======
+
+
   // ===== Profile endpoints (Protected) =====
 
-  /// GET /profiles/{userId}
-  ///
-  /// Requires Authorization Bearer token.
-  Future<Map<String, dynamic>> getProfile(String userId) async {
+/// GET /profiles/{userId}
+///
+/// Requires Authorization Bearer token.
+Future<Map<String, dynamic>> getProfile(String userId) async {
     final res = await http.get(
       Uri.parse('$baseUrl/profiles/$userId'),
       headers: authHeaders(),
@@ -220,5 +210,5 @@ class ApiService {
   Future<void> updateAvatarUrl(String userId, String avatarUrl) async {
     await updateProfile(userId, {'avatar_url': avatarUrl});
   }
+
 }
->>>>>>> 77e737c750dda9fd1497b31c42291480ea702d66
