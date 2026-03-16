@@ -65,26 +65,45 @@ class ApiService {
   }
 
   /// GET /bill/{userId}?bill_limit=...
-  Future<Map<String, dynamic>> getBill({double? billLimit}) async {
-    String url = '$baseUrl/bill/$_userId';
+Future<Map<String, dynamic>> getBill() async {
+  final url = '$baseUrl/bill/$_userId';
 
-    if (billLimit != null) {
-      url += '?bill_limit=$billLimit';
-    }
+  final response = await http.get(Uri.parse(url));
 
-    if (billLimit != null) url += '?bill_limit=$billLimit';
+  debugPrint('GET BILL -> $url');
+  debugPrint('GET BILL <- status=${response.statusCode}');
+  debugPrint('GET BILL <- body=${response.body}');
 
-
-    final response = await http.get(Uri.parse(url));
-    if (response.statusCode == 200) {
-      final jsonResponse = json.decode(response.body);
-      return jsonResponse['data'];
-    } else {
-      throw Exception('Failed to load bill prediction');
-    }
+  if (response.statusCode == 200) {
+    final jsonResponse = json.decode(response.body);
+    return jsonResponse['data'];
+  } else {
+    throw Exception('Failed to load bill prediction: ${response.body}');
   }
+}
 
-  /// GET /energy/{userId}
+Future<Map<String, dynamic>> setBillLimit(double billLimit) async {
+  final url = '$baseUrl/bill/$_userId';
+
+  final response = await http.post(
+    Uri.parse(url),
+    headers: {'Content-Type': 'application/json'},
+    body: json.encode({
+      'limit_amount': billLimit,
+    }),
+  );
+
+  debugPrint('POST BILL LIMIT -> $url');
+  debugPrint('POST BILL LIMIT <- status=${response.statusCode}');
+  debugPrint('POST BILL LIMIT <- body=${response.body}');
+
+  if (response.statusCode == 200) {
+    final jsonResponse = json.decode(response.body);
+    return jsonResponse['data'];
+  } else {
+    throw Exception('Failed to save bill limit: ${response.body}');
+  }
+}/// GET /energy/{userId}
   Future<Map<String, dynamic>> getEnergyStats() async {
     final response = await http.get(Uri.parse('$baseUrl/energy/$_userId'));
     if (response.statusCode == 200) {

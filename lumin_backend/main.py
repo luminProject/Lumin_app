@@ -114,7 +114,8 @@ class DeviceCreate(BaseModel):
     device_type: str
     panel_capacity: float | None = None
 
-
+class BillLimitIn(BaseModel):
+    limit_amount: float
 # -----------------------------
 # Root Endpoint
 # -----------------------------
@@ -212,15 +213,14 @@ def delete_device(device_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@app.get("/ping")
+def ping():
+    return {"ping": "pong"}
 # -----------------------------
 # Billing Endpoint
 # -----------------------------
 @app.get("/bill/{user_id}")
 def get_bill(user_id: str):
-    """
-    Calculate current electricity bill estimate.
-    """
     try:
         return {
             "status": "success",
@@ -230,6 +230,16 @@ def get_bill(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/bill/{user_id}")
+def set_bill_limit(user_id: str, payload: BillLimitIn):
+    try:
+        facade.set_bill_limit(user_id, int(payload.limit_amount))
+        return {
+            "status": "success",
+            "data": facade.get_my_current_bill(user_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 # -----------------------------
 # Solar Forecast Endpoint
 # -----------------------------

@@ -1,9 +1,14 @@
 
 
+from datetime import date
+import datetime
 from typing import List, Dict, Any
 from app.supabase_client import supabase
 from app.models.user import User
 
+from app.models.energy_calculation import EnergyCalculation
+from app.models.notification import Notification
+from app.models.bill_prediction import BillPrediction, Tariff018Strategy
 class LuminFacade:
     """
     Single Facade that aggregates all subsystems as required in the LUMIN report
@@ -205,37 +210,86 @@ class LuminFacade:
         }
 
     # -----------------------------
-    # BILL PREDICTION (BillPrediction & Billing Strategy)
+    # BILL PREDICTION
     # -----------------------------
-    def get_my_current_bill(self, user_id: str, bill_limit: float = None) -> Dict[str, Any]:
-        """
-        حسب التقرير، يعتمد على SEC Tariff (0.18 لأول 6000 كيلو واط، ثم 0.30).
-        كما يتحقق مما إذا كان المستخدم قريباً من الحد الذي وضعه (Bill Limit).
-        """
-        energy = self.view_energy_energy_calculation(user_id)
-        # نحسب الفاتورة على الاستهلاك الفعلي مطروحاً منه الإنتاج (الصافي)
-        net_kwh = max(0, energy.get("total_consumption_kwh", 0) - energy.get("total_production_kwh", 0))
-
-        # تطبيق استراتيجية التسعير (Strategy pattern: Tariff018Strategy & Tariff030Strategy)
-        if net_kwh <= 6000:
-            bill = net_kwh * 0.18
-        else:
-            bill = (6000 * 0.18) + ((net_kwh - 6000) * 0.30)
-
-        bill = round(bill, 2)
-        
-        # التحقق من تجاوز الحد المسموح (Bill Limit) 
-        limit_warning = False
-        if bill_limit and bill >= (bill_limit * 0.9): # تنبيه إذا وصل لـ 90٪ من الحد
-            limit_warning = True
+    def set_bill_limit(self, user_id: str, limit: int) -> Dict[str, Any]:
+        bill_manager = BillPrediction(
+            strategy=Tariff018Strategy(),
+            limit_id=0,
+            actual_bill=0.0,
+            predicted_bill=0.0,
+            user_id=user_id,
+            set_date=date.today(),
+            limit_amount=0.0,
+            supabase=self.supabase,
+        )
+        bill_manager.loadCurrentMonth()
+        bill_manager.setLimit(limit)
 
         return {
             "user_id": user_id,
-            "net_consumption_kwh": net_kwh,
-            "estimated_bill_sar": bill,
-            "limit_warning": limit_warning
+            "limit_id": bill_manager.limit_id,
+            "limit_amount": bill_manager.limit_amount,
+            "set_date": bill_manager.set_date.isoformat(),
         }
 
+    def get_my_current_bill(self, user_id: str) -> Dict[str, Any]:
+        energy_monitor = EnergyCalculation(
+            Energy_id=0,
+            date=date.today(),
+            total_consumption=0.0,
+            total_production=0.0,
+            cost_savings=0.0,
+            carbon_reduction=0.0,
+            user_id=user_id,
+            supabase=self.supabase,
+        )
+        bill_data = energy_monitor.viewSummary()
+
+        bill_manager = BillPrediction(
+            strategy=Tariff018Strategy(),
+            limit_id=0,
+            actual_bill=0.0,
+            predicted_bill=0.0,
+            user_id=user_id,
+            set_date=date.today(),
+            limit_amount=0.0,
+            supabase=self.supabase,
+        )
+        bill_manager.loadCurrentMonth()
+        bill_manager.updatePrediction(bill_data)
+
+        warning_status = bill_manager.compareActualWithPredicted()
+
+        if warning_status == 1:
+            notification = Notification(
+                notification_id=0,
+                content="",
+                notification_type="bill_warning",
+                timestamp=datetime.utcnow(),
+                user_id=user_id,
+                supabase=self.supabase,
+            )
+            notification.setContent(
+                f"Your predicted bill ({bill_manager.predicted_bill} SAR) may exceed your limit ({bill_manager.limit_amount} SAR)."
+            )
+            notification.sendNotification()
+
+        return {
+    "user_id": user_id,
+    "limit_id": bill_manager.limit_id,
+    "limit_amount": bill_manager.limit_amount,
+    "actual_bill": bill_manager.actual_bill,
+    "predicted_bill": bill_manager.predicted_bill,
+    "set_date": bill_manager.set_date.isoformat(),
+    "tariff_strategy": bill_manager.strategy.__class__.__name__,
+    "limit_warning": True if warning_status == 1 else False,
+    "current_usage_kwh": bill_manager.actual_usage_kwh,
+    "predicted_usage_kwh": bill_manager.predicted_usage_kwh,
+    "days_passed": bill_data.get("days_passed", 0),
+    "days_in_month": bill_data.get("days_in_month", 30),
+    "forecast_available": bill_data.get("days_passed", 0) >= 7,
+}
     # -----------------------------
     # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS 
     # -----------------------------

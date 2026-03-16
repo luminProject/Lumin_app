@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:lumin_application/Recomendation/notificationspage.dart';
@@ -6,6 +7,7 @@ import 'package:lumin_application/Widgets/home/bottom_nav.dart';
 import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/Widgets/responsive_layout.dart';
 import 'package:lumin_application/theme/app_colors.dart';
+import 'package:lumin_application/services/api_service.dart';
 
 class BillPredictionPage extends StatefulWidget {
   const BillPredictionPage({super.key});
@@ -15,51 +17,154 @@ class BillPredictionPage extends StatefulWidget {
 }
 
 class _BillPredictionPageState extends State<BillPredictionPage> {
+  final ApiService _api = ApiService();
+
   double? _billLimit;
-  bool _overLimitAlert = true;
+  bool _overLimitAlert = false;
+  bool _forecastReady = false;
 
-  // Mock data — اربطيها لاحقًا بالـ backend
-  double _currentBill = 286;
-  double _predictedBill = 480;
-  double _currentUsage = 1142;
-  double _predictedUsage = 1920;
+  double _currentBill = 0;
+  double _predictedBill = 0;
+  double _currentUsage = 0;
+  double _predictedUsage = 0;
 
-  int _daysPassed = 11;
-  int _daysInMonth = 31;
+  int _daysPassed = 0;
+  int _daysInMonth = 30;
   DateTime _lastUpdated = DateTime.now();
+
+  bool _isLoading = true;
+  bool _isSaving = false;
+  String? _errorMessage;
+
+  Timer? _refreshTimer;
 
   final TextEditingController _billLimitController = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    _loadBillData();
+
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      _loadBillData(isAutoRefresh: true);
+    });
+  }
+
+  @override
   void dispose() {
+    _refreshTimer?.cancel();
     _billLimitController.dispose();
     super.dispose();
   }
 
-  bool get _hasBillLimit => _billLimit != null;
+  bool get _hasBillLimit => _billLimit != null && _billLimit! > 0;
 
-  double get _differenceFromLimit {
-    if (_billLimit == null) return 0;
-    return _predictedBill - _billLimit!;
+  String _formatFixedRange(double centerValue, double halfRange,
+      {int decimals = 0}) {
+    if (!_forecastReady || centerValue <= 0) return '--';
+
+    final minValue = math.max(0, centerValue - halfRange);
+    final maxValue = centerValue + halfRange;
+
+    if (decimals == 0) {
+      return '${minValue.round()}–${maxValue.round()}';
+    }
+
+    return '${minValue.toStringAsFixed(decimals)}–${maxValue.toStringAsFixed(decimals)}';
+  }
+
+  double get _predictedBillMin {
+    if (!_forecastReady || _predictedBill <= 0) return 0;
+    return math.max(0, _predictedBill - 10);
+  }
+
+  double get _predictedBillMax {
+    if (!_forecastReady || _predictedBill <= 0) return 0;
+    return _predictedBill + 10;
+  }
+
+  double get _predictedUsageMin {
+    if (!_forecastReady || _predictedUsage <= 0) return 0;
+    return math.max(0, _predictedUsage - 100);
+  }
+
+  double get _predictedUsageMax {
+    if (!_forecastReady || _predictedUsage <= 0) return 0;
+    return _predictedUsage + 100;
+  }
+
+  String get _predictedBillRangeText {
+    return _formatFixedRange(_predictedBill, 10, decimals: 0);
+  }
+
+  String get _predictedUsageRangeText {
+    return _formatFixedRange(_predictedUsage, 100, decimals: 0);
+  }
+
+  String get _predictedBillMinText {
+    if (!_forecastReady) return '--';
+    return '${_predictedBillMin.round()}';
+  }
+
+  String get _predictedBillMaxText {
+    if (!_forecastReady) return '--';
+    return '${_predictedBillMax.round()}';
+  }
+
+  bool get _willLikelyExceedLimit {
+    if (!_hasBillLimit || !_forecastReady) return false;
+    return _predictedBillMin > _billLimit!;
+  }
+
+  bool get _mayExceedLimit {
+    if (!_hasBillLimit || !_forecastReady) return false;
+    return _predictedBillMin <= _billLimit! && _predictedBillMax > _billLimit!;
+  }
+
+  bool get _isSafelyBelowLimit {
+    if (!_hasBillLimit || !_forecastReady) return false;
+    return _predictedBillMax <= _billLimit!;
   }
 
   bool get _isOverLimit {
-    if (_billLimit == null) return false;
-    return _predictedBill > _billLimit!;
+    if (!_hasBillLimit || !_forecastReady) return false;
+    return _predictedBillMax > _billLimit!;
+  }
+
+  double get _differenceFromLimit {
+    if (!_hasBillLimit || !_forecastReady) return 0;
+    return _predictedBillMax - _billLimit!;
   }
 
   double get _remainingToLimit {
-    if (_billLimit == null) return 0;
-    final value = _billLimit! - _predictedBill;
+    if (!_hasBillLimit || !_forecastReady) return 0;
+    final value = _billLimit! - _predictedBillMax;
     return value < 0 ? 0 : value;
   }
 
   double get _forecastRatioRaw {
-    if (_billLimit == null || _billLimit! <= 0) return 0;
-    return _predictedBill / _billLimit!;
+    if (!_hasBillLimit || !_forecastReady || _billLimit! <= 0) return 0;
+    return _predictedBillMax / _billLimit!;
   }
 
-  String get _monthLabel => 'March 2026';
+  String get _monthLabel {
+    const months = <String>[
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${months[_lastUpdated.month - 1]} ${_lastUpdated.year}';
+  }
 
   String get _formattedUpdatedTime {
     final hour = _lastUpdated.hour > 12
@@ -71,15 +176,134 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   }
 
   String get _statusText {
+    if (!_forecastReady) {
+      return 'Your first forecast will be available after 7 recorded days.';
+    }
+
     if (!_hasBillLimit) {
-      return 'Set a monthly bill limit to compare your forecast against your budget.';
+      return 'Set a monthly bill limit to compare the forecast against your budget.';
     }
 
-    if (_isOverLimit) {
-      return 'You may exceed your limit by ${_differenceFromLimit.round()} ﷼';
+    if (_willLikelyExceedLimit) {
+      return 'You are likely to exceed your limit';
     }
 
-    return 'You are on track to stay ${_remainingToLimit.round()} ﷼ below your limit';
+    if (_mayExceedLimit) {
+      return 'You may exceed your limit';
+    }
+
+    if (_isSafelyBelowLimit) {
+      return 'You are on track to stay ${_remainingToLimit.round()} ﷼ below your limit';
+    }
+
+    return 'Forecast updated';
+  }
+
+  Future<void> _loadBillData({bool isAutoRefresh = false}) async {
+    if (!mounted) return;
+
+    if (!isAutoRefresh) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final data = await _api.getBill();
+
+      final rawLimit = data['limit_amount'];
+      final parsedLimit =
+          rawLimit != null ? (rawLimit as num).toDouble() : null;
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentBill = ((data['actual_bill'] ?? 0) as num).toDouble();
+        _predictedBill = ((data['predicted_bill'] ?? 0) as num).toDouble();
+        _currentUsage = ((data['current_usage_kwh'] ?? 0) as num).toDouble();
+        _predictedUsage =
+            ((data['predicted_usage_kwh'] ?? 0) as num).toDouble();
+
+        _billLimit =
+            (parsedLimit != null && parsedLimit > 0) ? parsedLimit : null;
+
+        _overLimitAlert = data['limit_warning'] ?? false;
+        _forecastReady = data['forecast_available'] ?? false;
+        _daysPassed = data['days_passed'] ?? 0;
+        _daysInMonth = data['days_in_month'] ?? 30;
+        _lastUpdated = DateTime.now();
+        _errorMessage = null;
+      });
+    } catch (e) {
+      debugPrint('BILL LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      if (!isAutoRefresh) {
+        setState(() {
+          _errorMessage = 'Unable to load bill data';
+        });
+      }
+    } finally {
+      if (!mounted) return;
+
+      if (!isAutoRefresh) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _saveBillLimit(double limit) async {
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final data = await _api.setBillLimit(limit);
+
+      final rawLimit = data['limit_amount'];
+      final parsedLimit =
+          rawLimit != null ? (rawLimit as num).toDouble() : null;
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentBill = ((data['actual_bill'] ?? 0) as num).toDouble();
+        _predictedBill = ((data['predicted_bill'] ?? 0) as num).toDouble();
+        _currentUsage = ((data['current_usage_kwh'] ?? 0) as num).toDouble();
+        _predictedUsage =
+            ((data['predicted_usage_kwh'] ?? 0) as num).toDouble();
+
+        _billLimit =
+            (parsedLimit != null && parsedLimit > 0) ? parsedLimit : null;
+
+        _overLimitAlert = data['limit_warning'] ?? false;
+        _forecastReady = data['forecast_available'] ?? false;
+        _daysPassed = data['days_passed'] ?? 0;
+        _daysInMonth = data['days_in_month'] ?? 30;
+        _lastUpdated = DateTime.now();
+      });
+
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bill limit updated successfully')),
+      );
+    } catch (e) {
+      debugPrint('BILL SAVE ERROR: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to save bill limit')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
   }
 
   void _openSetBillLimitSheet() {
@@ -128,12 +352,12 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
               const SizedBox(height: 12),
               TextField(
                 controller: _billLimitController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
                 ),
-                cursorColor: Colors.white,
                 decoration: InputDecoration(
                   hintText: 'e.g. 450',
                   hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
@@ -141,15 +365,18 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                   fillColor: Colors.white.withOpacity(0.08),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+                    borderSide:
+                        BorderSide(color: Colors.white.withOpacity(0.10)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+                    borderSide:
+                        BorderSide(color: Colors.white.withOpacity(0.10)),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: Colors.white.withOpacity(0.25)),
+                    borderSide:
+                        BorderSide(color: Colors.white.withOpacity(0.25)),
                   ),
                 ),
               ),
@@ -158,20 +385,18 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: () {
-                    final raw = _billLimitController.text.trim();
-                    final value = double.tryParse(raw);
-                    if (value == null || value <= 0) return;
-
-                    setState(() {
-                      _billLimit = value;
-                      _lastUpdated = DateTime.now();
-                    });
-
-                    Navigator.pop(ctx);
-                  },
+                  onPressed: _isSaving
+                      ? null
+                      : () {
+                          final value =
+                              double.tryParse(_billLimitController.text.trim());
+                          if (value == null || value <= 0) return;
+                          _saveBillLimit(value);
+                        },
                   child: Text(
-                    _hasBillLimit ? 'Save Changes' : 'Set Bill Limit',
+                    _isSaving
+                        ? 'Saving...'
+                        : (_hasBillLimit ? 'Save Changes' : 'Set Bill Limit'),
                     style: const TextStyle(
                       fontSize: 15.5,
                       fontWeight: FontWeight.w900,
@@ -207,52 +432,76 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
           ),
         ],
         bottomNavigationBar: const HomeBottomNav(currentIndex: 1),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 26),
-
-              _buildForecastHeader(),
-              const SizedBox(height: 14),
-
-              _buildHeroForecastCard(),
-              const SizedBox(height: 14),
-
-              _buildDoubleStatCard(
-                title: 'Bill Summary',
-                leadingIcon: Icons.receipt_long_rounded,
-                leftLabel: 'Current Bill',
-                leftValue: _currentBill.round().toString(),
-                leftUnit: '﷼ so far',
-                rightLabel: 'Predicted Bill',
-                rightValue: _predictedBill.round().toString(),
-                rightUnit: '﷼ by month-end',
-              ),
-              const SizedBox(height: 12),
-
-              _buildDoubleStatCard(
-                title: 'Usage Summary',
-                leadingIcon: Icons.flash_on_rounded,
-                leftLabel: 'Current Usage',
-                leftValue: _currentUsage.round().toString(),
-                leftUnit: 'kWh so far',
-                rightLabel: 'Predicted Usage',
-                rightValue: _predictedUsage.round().toString(),
-                rightUnit: 'kWh forecast',
-              ),
-              const SizedBox(height: 14),
-
-              _buildAlertCard(),
-
-              if (_hasBillLimit) ...[
-                const SizedBox(height: 14),
-                _buildLimitCard(),
-              ],
-            ],
-          ),
-        ),
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _errorMessage!,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton(
+                          onPressed: _loadBillData,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _loadBillData,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 26),
+                          _buildForecastHeader(),
+                          const SizedBox(height: 14),
+                          _buildHeroForecastCard(),
+                          const SizedBox(height: 14),
+                          _buildDoubleStatCard(
+                            title: 'Bill Summary',
+                            leadingIcon: Icons.receipt_long_rounded,
+                            leftLabel: 'Current Bill',
+                            leftValue: '${_currentBill.round()} ﷼',
+                            leftUnit: 'so far',
+                            rightLabel: _forecastReady
+                                ? 'Predicted Bill'
+                                : 'Forecast Status',
+                            rightValue: _forecastReady
+                                ? '${_predictedBillRangeText} ﷼'
+                                : '--',
+                            rightUnit: _forecastReady
+                                ? 'Expected by month-end'
+                                : 'Need 7 days',
+                          ),
+                          const SizedBox(height: 12),
+                          _buildDoubleStatCard(
+                            title: 'Usage Summary',
+                            leadingIcon: Icons.flash_on_rounded,
+                            leftLabel: 'Current Usage',
+                            leftValue: _currentUsage.round().toString(),
+                            leftUnit: 'kWh so far',
+                            rightLabel: 'Predicted Usage',
+                            rightValue:
+                                _forecastReady ? _predictedUsageRangeText : '--',
+                            rightUnit: _forecastReady
+                                ? 'Expected by month-end'
+                                : 'Need 7 days',
+                          ),
+                          const SizedBox(height: 14),
+                          _buildAlertCard(),
+                          const SizedBox(height: 14),
+                          _buildLimitCard(),
+                        ],
+                      ),
+                    ),
+                  ),
       ),
     );
   }
@@ -291,7 +540,9 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Forecast for $_monthLabel • based on $_daysPassed of $_daysInMonth days',
+                  _forecastReady
+                      ? 'Forecast for $_monthLabel based on recent usage'
+                      : 'Forecast will be available after 7 recorded days',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.68),
                     fontSize: 12,
@@ -307,16 +558,25 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   }
 
   Widget _buildHeroForecastCard() {
-    final Color ringColor = _hasBillLimit
-        ? (_isOverLimit ? const Color(0xFFFF5A5F) : AppColors.mint)
-        : Colors.white.withOpacity(0.28);
+    final Color ringColor = !_forecastReady
+        ? Colors.white.withOpacity(0.20)
+        : (_hasBillLimit
+            ? (_willLikelyExceedLimit || _mayExceedLimit
+                ? const Color(0xFFFF5A5F)
+                : AppColors.mint)
+            : Colors.white.withOpacity(0.28));
 
-    final Color valueColor = _hasBillLimit
-        ? (_isOverLimit ? const Color(0xFFFF5A5F) : AppColors.mint)
-        : AppColors.mint;
+    final Color valueColor = !_forecastReady
+        ? Colors.white70
+        : (_hasBillLimit
+            ? (_willLikelyExceedLimit || _mayExceedLimit
+                ? const Color(0xFFFF5A5F)
+                : AppColors.mint)
+            : AppColors.mint);
 
-    final double progressForCircle =
-        _hasBillLimit ? _forecastRatioRaw.clamp(0.0, 1.0) : 0.0;
+    final double progressForCircle = (_hasBillLimit && _forecastReady)
+        ? _forecastRatioRaw.clamp(0.0, 1.0)
+        : 0.0;
 
     return GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
@@ -335,56 +595,116 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
           const SizedBox(height: 18),
           Center(
             child: SizedBox(
-              width: 200,
-              height: 200,
+              width: 184,
+              height: 184,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   CustomPaint(
-                    size: const Size(200, 200),
+                    size: const Size(184, 184),
                     painter: CircularForecastPainter(
                       progress: progressForCircle,
                       color: ringColor,
                       backgroundColor: Colors.white.withOpacity(0.08),
                     ),
                   ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${_predictedBill.round()}',
-                        style: TextStyle(
-                          color: valueColor,
-                          fontSize: 40,
-                          fontWeight: FontWeight.w900,
-                          height: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'SAR',
-                        style: TextStyle(
-                          color: valueColor,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        _hasBillLimit
-                            ? 'vs Limit ${_billLimit!.round()} SAR'
-                            : 'No bill limit set',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.65),
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                  SizedBox(
+                    width: 118,
+                    child: _forecastReady
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _predictedBillMinText,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: valueColor,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'to',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.70),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _predictedBillMaxText,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: valueColor,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '﷼',
+                                style: TextStyle(
+                                  color: valueColor,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '--',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: valueColor,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No forecast yet',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: valueColor,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
                   ),
                 ],
               ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Expected by month-end',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.65),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _hasBillLimit
+                ? 'vs Limit ${_billLimit!.round()} ﷼'
+                : 'No bill limit set',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.65),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 16),
@@ -392,7 +712,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
             _statusText,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: _hasBillLimit && _isOverLimit
+              color: _forecastReady && (_willLikelyExceedLimit || _mayExceedLimit)
                   ? Colors.orangeAccent
                   : AppColors.mint,
               fontSize: 13,
@@ -428,7 +748,9 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
               ),
               _infoChip(
                 icon: Icons.flash_on_rounded,
-                text: '${_predictedUsage.round()} kWh',
+                text: _forecastReady
+                    ? '$_predictedUsageRangeText kWh'
+                    : 'Need 7 days',
               ),
             ],
           ),
@@ -556,7 +878,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   }
 
   Widget _buildAlertCard() {
-    final bool enabled = _hasBillLimit;
+    final bool enabled = _hasBillLimit && _forecastReady;
 
     return GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -595,7 +917,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                   Text(
                     enabled
                         ? 'Notify me if the forecast exceeds my monthly limit'
-                        : 'Set a bill limit to enable over-limit alerts',
+                        : 'Alert available after forecast becomes ready',
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.62),
                       fontSize: 12,
@@ -643,7 +965,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
               border: Border.all(color: Colors.white.withOpacity(0.08)),
             ),
             child: Text(
-              '${_billLimit!.round()} ﷼',
+              _hasBillLimit ? '${_billLimit!.round()} ﷼' : 'Not set yet',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 22,
@@ -657,9 +979,9 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
             height: 50,
             child: ElevatedButton(
               onPressed: _openSetBillLimitSheet,
-              child: const Text(
-                'Adjust Bill Limit',
-                style: TextStyle(
+              child: Text(
+                _hasBillLimit ? 'Adjust Bill Limit' : 'Set Bill Limit',
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w900,
                 ),
@@ -718,7 +1040,7 @@ class CircularForecastPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final strokeWidth = 16.0;
+    final strokeWidth = 12.0;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (size.width / 2) - strokeWidth;
 
