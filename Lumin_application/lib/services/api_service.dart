@@ -17,7 +17,6 @@ import 'package:flutter/foundation.dart';
 ///     Authorization: Bearer <token>
 class ApiService {
 
-
   /// Base URL for backend depending on current platform.
   static String get baseUrl => kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
 
@@ -51,7 +50,7 @@ class ApiService {
     return headers;
   }
 
-  // ===== Existing endpoints (as in your file) =====
+  // ===== Devices =====
 
   /// GET /devices/{userId}
   Future<List<dynamic>> getDevices() async {
@@ -64,170 +63,207 @@ class ApiService {
     }
   }
 
-  /// GET /bill/{userId}?bill_limit=...
-Future<Map<String, dynamic>> getBill() async {
-  final url = '$baseUrl/bill/$_userId';
-
-  final response = await http.get(Uri.parse(url));
-
-  debugPrint('GET BILL -> $url');
-  debugPrint('GET BILL <- status=${response.statusCode}');
-  debugPrint('GET BILL <- body=${response.body}');
-
-  if (response.statusCode == 200) {
-    final jsonResponse = json.decode(response.body);
-    return jsonResponse['data'];
-  } else {
-    throw Exception('Failed to load bill prediction: ${response.body}');
-  }
-}
-
-Future<Map<String, dynamic>> setBillLimit(double billLimit) async {
-  final url = '$baseUrl/bill/$_userId';
-
-  final response = await http.post(
-    Uri.parse(url),
-    headers: {'Content-Type': 'application/json'},
-    body: json.encode({
-      'limit_amount': billLimit,
-    }),
-  );
-
-  debugPrint('POST BILL LIMIT -> $url');
-  debugPrint('POST BILL LIMIT <- status=${response.statusCode}');
-  debugPrint('POST BILL LIMIT <- body=${response.body}');
-
-  if (response.statusCode == 200) {
-    final jsonResponse = json.decode(response.body);
-    return jsonResponse['data'];
-  } else {
-    throw Exception('Failed to save bill limit: ${response.body}');
-  }
-}/// GET /energy/{userId}
-  Future<Map<String, dynamic>> getEnergyStats() async {
-    final response = await http.get(Uri.parse('$baseUrl/energy/$_userId'));
-    if (response.statusCode == 200) {
-      final jsonResponse = json.decode(response.body);
-      return jsonResponse['data'];
-    } else {
-      throw Exception('Failed to load energy stats');
-    }
-  }
-
-  /// GET /solar-forecast/{userId}
-  Future<Map<String, dynamic>> getSolarForecast() async {
-
-    final response = await http.get(
-      Uri.parse('$baseUrl/solar-forecast/$_userId'),
-    );
-
-    if (response.statusCode == 200) {
-      final jsonResponse = json.decode(response.body);
-      return jsonResponse['data'];
-    } else {
-      throw Exception('Failed to load solar forecast');
-    }
-  }
-
-  /// GET /recommendations/{userId}
-  Future<List<dynamic>> getRecommendations() async {
-
-    final response = await http.get(
-      Uri.parse('$baseUrl/recommendations/$_userId'),
-    );
-
-  
-    if (response.statusCode == 200) {
-      final jsonResponse = json.decode(response.body);
-      return jsonResponse['data'] ?? [];
-    } else {
-      throw Exception('Failed to load recommendations');
-    }
-  }
-
-
-  // 6. إضافة جهاز
+  /// POST /devices/{userId}
   Future<void> addDevice({
     required String deviceName,
     required String deviceType,
     String? panelCapacity,
   }) async {
-    debugPrint('ADD DEVICE -> userId=$_userId');
-    debugPrint('ADD DEVICE -> name=$deviceName type=$deviceType');
     final body = {
       "name": deviceName,
       "device_type": deviceType,
       "panel_capacity": panelCapacity,
     };
-    debugPrint(
-      'ADD DEVICE -> url=$baseUrl/devices/$_userId body=${json.encode(body)}',
-    );
-
     final response = await http.post(
       Uri.parse('$baseUrl/devices/$_userId'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode(body),
     );
-    debugPrint('ADD DEVICE <- status=${response.statusCode}');
-    debugPrint('ADD DEVICE <- body=${response.body}');
-
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to add device');
     }
   }
 
-  // 7. حذف جهاز
+  /// DELETE /devices/{deviceId}
   Future<void> deleteDevice(int deviceId) async {
     final response = await http.delete(Uri.parse('$baseUrl/devices/$deviceId'));
-
     if (response.statusCode != 200) {
       throw Exception('Failed to delete device');
     }
   }
 
+  // ===== Bill =====
 
-  // ===== Profile endpoints (Protected) =====
+  /// GET /bill/{userId}
+  Future<Map<String, dynamic>> getBill() async {
+    final url = '$baseUrl/bill/$_userId';
+    final response = await http.get(Uri.parse(url));
+    debugPrint('GET BILL <- status=${response.statusCode} body=${response.body}');
+    if (response.statusCode == 200) {
+      return json.decode(response.body)['data'];
+    } else {
+      throw Exception('Failed to load bill prediction: ${response.body}');
+    }
+  }
 
-/// GET /profiles/{userId}
-///
-/// Requires Authorization Bearer token.
-Future<Map<String, dynamic>> getProfile(String userId) async {
+  /// POST /bill/{userId}
+  Future<Map<String, dynamic>> setBillLimit(double billLimit) async {
+    final url = '$baseUrl/bill/$_userId';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'limit_amount': billLimit}),
+    );
+    debugPrint('POST BILL LIMIT <- status=${response.statusCode}');
+    if (response.statusCode == 200) {
+      return json.decode(response.body)['data'];
+    } else {
+      throw Exception('Failed to save bill limit: ${response.body}');
+    }
+  }
+
+  // ===== Energy =====
+
+  /// GET /energy/{userId}
+  Future<Map<String, dynamic>> getEnergyStats() async {
+    final response = await http.get(Uri.parse('$baseUrl/energy/$_userId'));
+    if (response.statusCode == 200) {
+      return json.decode(response.body)['data'];
+    } else {
+      throw Exception('Failed to load energy stats');
+    }
+  }
+
+  // ===== Solar =====
+
+  /// GET /solar-forecast/{userId}
+  Future<Map<String, dynamic>> getSolarForecast() async {
+    final response = await http.get(Uri.parse('$baseUrl/solar-forecast/$_userId'));
+    if (response.statusCode == 200) {
+      return json.decode(response.body)['data'];
+    } else {
+      throw Exception('Failed to load solar forecast');
+    }
+  }
+
+  // ===== Recommendations =====
+
+  /// POST /recommendations/generate/{userId}
+  ///
+  /// Generates a new recommendation based on solar + device data,
+  /// saves it to DB, and also creates a notification automatically.
+  Future<Map<String, dynamic>> generateRecommendation() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/recommendations/generate/$_userId'),
+      headers: authHeaders(),
+    );
+    debugPrint('GENERATE REC <- status=${response.statusCode}');
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to generate recommendation: ${response.body}');
+    }
+  }
+
+  /// GET /recommendations/latest/{userId}
+  ///
+  /// Returns the most recently generated recommendation.
+  Future<Map<String, dynamic>?> getLatestRecommendation() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/recommendations/latest/$_userId'),
+      headers: authHeaders(),
+    );
+    debugPrint('GET LATEST REC <- status=${response.statusCode}');
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      // Returns null if no recommendation exists yet
+      return body['data'] as Map<String, dynamic>?;
+    } else {
+      throw Exception('Failed to load latest recommendation: ${response.body}');
+    }
+  }
+
+  /// GET /recommendations/all/{userId}
+  ///
+  /// Returns all past recommendations ordered newest first.
+  Future<List<dynamic>> getAllRecommendations() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/recommendations/all/$_userId'),
+      headers: authHeaders(),
+    );
+    debugPrint('GET ALL RECS <- status=${response.statusCode}');
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      return body['data'] ?? [];
+    } else {
+      throw Exception('Failed to load recommendations: ${response.body}');
+    }
+  }
+
+  // ===== Notifications =====
+
+  /// GET /recommendations/notifications/{userId}
+  ///
+  /// Returns all notifications for the user ordered newest first.
+  Future<List<dynamic>> getNotifications() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/recommendations/notifications/$_userId'),
+      headers: authHeaders(),
+    );
+    debugPrint('GET NOTIFICATIONS <- status=${response.statusCode}');
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      return body['data'] ?? [];
+    } else {
+      throw Exception('Failed to load notifications: ${response.body}');
+    }
+  }
+
+  /// GET /recommendations/notifications/latest/{userId}
+  ///
+  /// Returns the most recent notification.
+  Future<Map<String, dynamic>?> getLatestNotification() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/recommendations/notifications/latest/$_userId'),
+      headers: authHeaders(),
+    );
+    debugPrint('GET LATEST NOTIFICATION <- status=${response.statusCode}');
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      return body['data'] as Map<String, dynamic>?;
+    } else {
+      throw Exception('Failed to load latest notification: ${response.body}');
+    }
+  }
+
+  // ===== Profile =====
+
+  /// GET /profiles/{userId}
+  Future<Map<String, dynamic>> getProfile(String userId) async {
     final res = await http.get(
       Uri.parse('$baseUrl/profiles/$userId'),
       headers: authHeaders(),
     );
-
     if (res.statusCode >= 400) {
       throw Exception('GET ${res.statusCode}: ${res.body}');
     }
-
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   /// PATCH /profiles/{userId}
-  ///
-  /// Requires Authorization Bearer token.
-  /// [payload] must match backend accepted fields (username, phone_number, etc).
   Future<void> updateProfile(String userId, Map<String, dynamic> payload) async {
     final res = await http.patch(
       Uri.parse('$baseUrl/profiles/$userId'),
       headers: authHeaders(json: true),
       body: jsonEncode(payload),
     );
-
     if (res.statusCode >= 400) {
       throw Exception('PATCH ${res.statusCode}: ${res.body}');
     }
   }
 
   /// Convenience wrapper to update only the avatar_url.
-  ///
-  /// Flow:
-  /// 1) Upload image to Supabase Storage
-  /// 2) Get public URL
-  /// 3) Call this endpoint to save avatar_url in backend DB.
   Future<void> updateAvatarUrl(String userId, String avatarUrl) async {
     await updateProfile(userId, {'avatar_url': avatarUrl});
   }
-
 }

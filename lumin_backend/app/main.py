@@ -21,7 +21,8 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 
-from app.routes import router as profile_router
+from app.routers import router as profile_router
+from app.routers.recommendation_router import router as recommendation_router
 from app.core.lumin_facade import LuminFacade
 import supabase as supabase_
 
@@ -80,6 +81,9 @@ app.add_middleware(
 # Register profile routes
 app.include_router(profile_router)
 
+# Register recommendation routes
+app.include_router(recommendation_router)
+
 
 # -----------------------------
 # Request Models
@@ -112,10 +116,8 @@ class DeviceCreate(BaseModel):
     """
     name: str
     device_type: str
-    panel_capacity: float | None = None
 
-class BillLimitIn(BaseModel):
-    limit_amount: float
+
 # -----------------------------
 # Root Endpoint
 # -----------------------------
@@ -189,12 +191,7 @@ def add_device(user_id: str, device: DeviceCreate):
     Add a new smart device to the user account.
     """
     try:
-        res = facade.add_new_device(
-            user_id,
-            device.name,
-            device.device_type,
-            device.panel_capacity,
-        )
+        res = facade.add_new_device(user_id, device.name, device.device_type)
         return {"status": "success", "data": res}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -213,14 +210,15 @@ def delete_device(device_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/ping")
-def ping():
-    return {"ping": "pong"}
+
 # -----------------------------
 # Billing Endpoint
 # -----------------------------
 @app.get("/bill/{user_id}")
 def get_bill(user_id: str):
+    """
+    Calculate current electricity bill estimate.
+    """
     try:
         return {
             "status": "success",
@@ -230,16 +228,6 @@ def get_bill(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/bill/{user_id}")
-def set_bill_limit(user_id: str, payload: BillLimitIn):
-    try:
-        facade.set_bill_limit(user_id, int(payload.limit_amount))
-        return {
-            "status": "success",
-            "data": facade.get_my_current_bill(user_id)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 # -----------------------------
 # Solar Forecast Endpoint
 # -----------------------------

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import List
+from typing import List, Optional
 
 from app.models.observer import Observer
 
@@ -13,8 +13,8 @@ class Device:
     device_id: int
     device_name: str
     device_type: str
-    installation_date: date
-    user_id: int
+    installation_date: Optional[date]   # ✅ يقبل null
+    user_id: str                        # ✅ uuid من Supabase
 
     # - observers: List<Observer>
     observers: List[Observer] = field(default_factory=list)
@@ -72,6 +72,6 @@ class productionDevice(Device):
     def getDeviceInfo(self) -> str:
         return f"{self.device_name} (production) - {self.production_kwh} kWh"
 
-    # -getProduction():float  (مكتوبة بالسالب في الرسم بس هي دالة عادي)
+    # +getProduction():float
     def getProduction(self) -> float:
         return float(self.production_kwh)

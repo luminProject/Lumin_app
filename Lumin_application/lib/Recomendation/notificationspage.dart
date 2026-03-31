@@ -3,6 +3,7 @@ import 'package:lumin_application/Widgets/gradient_background.dart';
 import 'package:lumin_application/Widgets/responsive_layout.dart';
 import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/theme/app_colors.dart';
+import 'package:lumin_application/services/api_service.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
@@ -12,70 +13,99 @@ class NotificationsPage extends StatefulWidget {
 }
 
 class _NotificationsPageState extends State<NotificationsPage> {
+  final _api = ApiService();
+
   int _tab = 0; // 0=recommendations, 1=bill limit, 2=solar forecast
+  bool _loading = false;
+  String? _error;
+  List<_NotifItem> _allNotifications = [];
 
-  // Demo data (عدّليها لاحقاً حسب بياناتك)
-  final List<_NotifItem> _recs = const [
-    _NotifItem(
-      title: 'Run the washing machine now',
-      subtitle: 'Suggested • Now',
-      body: 'Solar production is high. Running it now can reduce grid usage and cost.',
-      icon: Icons.flash_on_rounded,
-      accent: AppColors.mint,
-    ),
-    _NotifItem(
-      title: 'Lower AC by 1°C for 2 hours',
-      subtitle: 'Suggested • Today',
-      body: 'Peak consumption detected. A small adjustment can reduce demand with minimal comfort impact.',
-      icon: Icons.ac_unit_rounded,
-      accent: AppColors.mint,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+  }
 
-  final List<_NotifItem> _bill = const [
-    _NotifItem(
-      title: 'You reached 80% of your bill limit',
-      subtitle: 'Bill limit • Today',
-      body: 'Consumption is approaching your monthly target. Consider reducing AC usage during peak hours.',
-      icon: Icons.warning_amber_rounded,
-      accent: Color(0xFFFFC56B),
-    ),
-    _NotifItem(
-      title: 'Over-limit alert is enabled',
-      subtitle: 'Bill limit • 2 days ago',
-      body: 'We will notify you if your predicted bill exceeds your limit.',
-      icon: Icons.notifications_active_rounded,
-      accent: Color(0xFFFFC56B),
-    ),
-  ];
+  Future<void> _loadNotifications() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final data = await _api.getNotifications();
+      setState(() {
+        _allNotifications = data
+            .cast<Map<String, dynamic>>()
+            .map(_mapToNotifItem)
+            .toList();
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
 
-  final List<_NotifItem> _solar = const [
-    _NotifItem(
-      title: 'Weather may reduce solar production by 15%',
-      subtitle: 'Solar forecast • Tomorrow',
-      body: 'Partly cloudy conditions expected. Consider shifting heavy loads to the best solar window.',
-      icon: Icons.cloud_rounded,
-      accent: Color(0xFFFFC56B),
-    ),
-    _NotifItem(
-      title: 'Strong solar window at 2–4 PM',
-      subtitle: 'Solar forecast • This week',
-      body: 'Forecast shows higher production mid-day. Scheduling appliances then can reduce grid usage.',
-      icon: Icons.wb_sunny_rounded,
-      accent: AppColors.mint,
-    ),
-  ];
+  _NotifItem _mapToNotifItem(Map<String, dynamic> n) {
+    final type = n['notification_type'] as String? ?? 'general';
+    final content = n['content'] as String? ?? '';
+    final timestamp = n['timestamp'] as String?;
+
+    String timeLabel = '';
+    if (timestamp != null) {
+      final dt = DateTime.tryParse(timestamp);
+      if (dt != null) {
+        final diff = DateTime.now().difference(dt);
+        if (diff.inMinutes < 60) timeLabel = '${diff.inMinutes} min ago';
+        else if (diff.inHours < 24) timeLabel = '${diff.inHours} hours ago';
+        else timeLabel = '${diff.inDays} days ago';
+      }
+    }
+
+    IconData icon;
+    Color accent;
+    switch (type) {
+      case 'recommendation':
+        icon = Icons.flash_on_rounded;
+        accent = AppColors.mint;
+        break;
+      case 'bill':
+        icon = Icons.warning_amber_rounded;
+        accent = const Color(0xFFFFC56B);
+        break;
+      case 'solar':
+        icon = Icons.wb_sunny_rounded;
+        accent = const Color(0xFFFFC56B);
+        break;
+      default:
+        icon = Icons.notifications_rounded;
+        accent = AppColors.mint;
+    }
+
+    return _NotifItem(
+      title: _extractTitle(content),
+      subtitle: timeLabel.isNotEmpty ? '$type • $timeLabel' : type,
+      body: content,
+      icon: icon,
+      accent: accent,
+      type: type,
+    );
+  }
+
+  String _extractTitle(String text) {
+    final dot = text.indexOf('.');
+    if (dot > 0 && dot < 80) return text.substring(0, dot + 1);
+    if (text.length > 60) return '${text.substring(0, 60)}...';
+    return text;
+  }
 
   List<_NotifItem> get _items {
-    if (_tab == 1) return _bill;
-    if (_tab == 2) return _solar;
-    return _recs;
+    if (_tab == 1) return _allNotifications.where((n) => n.type == 'bill').toList();
+    if (_tab == 2) return _allNotifications.where((n) => n.type == 'solar').toList();
+    return _allNotifications.where((n) => n.type == 'recommendation').toList();
   }
 
   String get _emptyText {
     if (_tab == 1) return 'No bill limit notifications right now.';
     if (_tab == 2) return 'No solar forecast notifications right now.';
-    return 'No recommendations notifications right now.';
+    return 'No recommendation notifications right now.';
   }
 
   String get _sectionTitle {
@@ -96,50 +126,69 @@ class _NotificationsPageState extends State<NotificationsPage> {
           onPressed: () => Navigator.pop(context),
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loadNotifications,
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+          ),
+        ],
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top filter (3 sections) — responsive لأن فيه scroll أفقي
+            if (_error != null) ...[
+              GlassCard(
+                radius: 14,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(_error!,
+                          style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 16, color: Colors.white54),
+                      onPressed: () => setState(() => _error = null),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+
+            // Filter chips
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
               child: Row(
                 children: [
-                  _FilterChip(
-                    text: 'Recommendation',
-                    selected: _tab == 0,
-                    onTap: () => setState(() => _tab = 0),
-                  ),
+                  _FilterChip(text: 'Recommendation', selected: _tab == 0, onTap: () => setState(() => _tab = 0)),
                   const SizedBox(width: 8),
-                  _FilterChip(
-                    text: 'Bill limit',
-                    selected: _tab == 1,
-                    onTap: () => setState(() => _tab = 1),
-                  ),
+                  _FilterChip(text: 'Bill limit', selected: _tab == 1, onTap: () => setState(() => _tab = 1)),
                   const SizedBox(width: 8),
-                  _FilterChip(
-                    text: 'Solar forecast',
-                    selected: _tab == 2,
-                    onTap: () => setState(() => _tab = 2),
-                  ),
+                  _FilterChip(text: 'Solar forecast', selected: _tab == 2, onTap: () => setState(() => _tab = 2)),
                 ],
               ),
             ),
 
             const SizedBox(height: 14),
 
-            Text(
-              _sectionTitle,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 14.5,
-              ),
-            ),
+            Text(_sectionTitle,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14.5)),
 
             const SizedBox(height: 10),
 
-            if (items.isEmpty)
+            if (_loading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: CircularProgressIndicator(color: AppColors.mint),
+                ),
+              )
+            else if (items.isEmpty)
               GlassCard(
                 radius: 18,
                 padding: const EdgeInsets.all(16),
@@ -148,23 +197,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     Icon(Icons.info_outline_rounded, color: Colors.white.withOpacity(0.65)),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        _emptyText,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.70),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      child: Text(_emptyText,
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.70),
+                              fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
               )
             else
               ...List.generate(items.length, (i) {
-                final n = items[i];
                 return Padding(
                   padding: EdgeInsets.only(bottom: i == items.length - 1 ? 0 : 10),
-                  child: _NotifCard(item: n),
+                  child: _NotifCard(item: items[i]),
                 );
               }),
 
@@ -182,6 +227,7 @@ class _NotifItem {
   final String body;
   final IconData icon;
   final Color accent;
+  final String type;
 
   const _NotifItem({
     required this.title,
@@ -189,12 +235,12 @@ class _NotifItem {
     required this.body,
     required this.icon,
     required this.accent,
+    required this.type,
   });
 }
 
 class _NotifCard extends StatelessWidget {
   final _NotifItem item;
-
   const _NotifCard({required this.item});
 
   @override
@@ -212,14 +258,13 @@ class _NotifCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.title,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    Text(item.title,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 6),
-                    Text(item.subtitle, style: const TextStyle(fontSize: 12, color: AppColors.sub)),
+                    Text(item.subtitle,
+                        style: const TextStyle(fontSize: 12, color: AppColors.sub)),
                   ],
                 ),
               ),
@@ -236,10 +281,8 @@ class _NotifCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            item.body,
-            style: const TextStyle(fontSize: 12, color: AppColors.sub, height: 1.25),
-          ),
+          Text(item.body,
+              style: const TextStyle(fontSize: 12, color: AppColors.sub, height: 1.25)),
         ],
       ),
     );
@@ -251,11 +294,7 @@ class _FilterChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  const _FilterChip({
-    required this.text,
-    required this.selected,
-    required this.onTap,
-  });
+  const _FilterChip({required this.text, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -267,7 +306,8 @@ class _FilterChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? AppColors.mint.withOpacity(0.18) : Colors.white10,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: selected ? AppColors.mint.withOpacity(0.35) : Colors.white12),
+          border: Border.all(
+              color: selected ? AppColors.mint.withOpacity(0.35) : Colors.white12),
         ),
         child: Text(
           text,
