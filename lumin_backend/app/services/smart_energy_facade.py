@@ -17,17 +17,20 @@ class SmartEnergyFacade:
     # =========================================================
     # Recommendation Methods
     # =========================================================
+
     def viewRecommendations(self, user_id: str) -> Dict[str, Any]:
         """
-        Generate recommendation for a user.
-        If recommendation is generated successfully, also create a notification.
+        Generate recommendation for a user based on their energy source type:
+        - Grid + Solar  → solar-based logic + general tip combined
+        - Grid only     → general tip from general_recommendations table
+
+        After generation, a notification is automatically created.
         """
         result = self.recommendation_service.generate_for_user(user_id)
 
+        # Create notification if recommendation was generated
         if result.get("success") and result.get("recommendation"):
-            recommendation_data = result["recommendation"]
-            recommendation_text = recommendation_data.get("recommendation_text")
-
+            recommendation_text = result["recommendation"].get("recommendation_text")
             if recommendation_text:
                 self.notification_service.create_recommendation_notification(
                     user_id=user_id,
@@ -45,6 +48,7 @@ class SmartEnergyFacade:
     # =========================================================
     # Notification Methods
     # =========================================================
+
     def getNotifications(self, user_id: str) -> Dict[str, Any]:
         return self.notification_service.get_user_notifications(user_id)
 
@@ -54,6 +58,7 @@ class SmartEnergyFacade:
     # =========================================================
     # Device Methods
     # =========================================================
+
     def getUserDevices(self, user_id: str) -> Dict[str, Any]:
         """
         Fetch all user devices from Supabase and convert them into objects
@@ -106,7 +111,8 @@ class SmartEnergyFacade:
                     "device_type": device.device_type,
                     "installation_date": (
                         device.installation_date.isoformat()
-                        if device.installation_date else None
+                        if device.installation_date
+                        else None
                     ),
                     "user_id": device.user_id,
                     "device_info": device.getDeviceInfo(),
@@ -119,4 +125,4 @@ class SmartEnergyFacade:
             "code": "DEVICE_INFOS_FETCHED",
             "message": "Device information fetched successfully.",
             "data": info_list,
-        }   
+        }

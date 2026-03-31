@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,14 +11,15 @@ from app.models.recommendation import Recommendation
 class RecommendationService:
     """
     Recommendation flow:
-    1) Fetch last 7 days solar readings
-    2) Group by period
-    3) Calculate average production per period
-    4) Find best period
-    5) Get shiftable devices
-    6) Calculate average consumption in that period
-    7) Choose closest match
-    8) Save recommendation
+
+    For users with solar panels (has_solar_panels=True, energy_source='Grid + Solar'):
+        1) Run solar-based logic (best period + shiftable device)
+        2) Also pick one random general recommendation
+        3) Save both to the recommendation table
+
+    For users without solar panels (Grid only):
+        1) Pick one random general recommendation
+        2) Save it to the recommendation table
     """
 
     PERIOD_MORNING = "morning"
@@ -31,125 +33,16 @@ class RecommendationService:
     # =========================================================
     # Public Methods
     # =========================================================
+
     def generate_for_user(self, user_id: str) -> Dict[str, Any]:
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=7)
+        # 1) Get user profile to check energy_source / has_solar_panels
+        user_profile = self._get_user_profile(user_id)
+        has_solar = self._user_has_solar(user_profile)
 
-        # 1) Get production devices (solar devices)
-        production_devices = self._get_devices_by_type(
-            user_id=user_id,
-            device_type="production",
-        )
-
-        if not production_devices:
-            return self._build_empty_response(
-                code="NO_PRODUCTION_DEVICES",
-                message="No production devices found for this user.",
-                user_id=user_id,
-            )
-
-        production_device_ids = [device["device_id"] for device in production_devices]
-
-        # 2) Get solar readings for last 7 days
-        solar_rows = self._get_sensor_rows_for_devices(
-            device_ids=production_device_ids,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        if not solar_rows:
-            return self._build_empty_response(
-                code="NO_SOLAR_READINGS",
-                message="No solar readings found for the last 7 days.",
-                user_id=user_id,
-            )
-
-        # 3) Calculate average solar production by period
-        avg_production_by_period = self._average_kwh_by_period(solar_rows)
-
-        if not avg_production_by_period:
-            return self._build_empty_response(
-                code="NO_VALID_SOLAR_PERIODS",
-                message="Solar readings exist, but no valid period averages could be calculated.",
-                user_id=user_id,
-            )
-
-        # 4) Find best period
-        best_period, best_period_avg = self._find_best_period(avg_production_by_period)
-
-        if best_period is None:
-            return self._build_empty_response(
-                code="BEST_PERIOD_NOT_FOUND",
-                message="Unable to determine the best solar production period.",
-                user_id=user_id,
-            )
-
-        # 5) Get shiftable consumption devices
-        shiftable_devices = self._get_shiftable_consumption_devices(user_id)
-
-        if not shiftable_devices:
-            recommendation_text = (
-                f"The best solar production period is {best_period}, "
-                f"with an average production of {best_period_avg:.2f} kWh. "
-                f"No shiftable devices were found for this user."
-            )
-
-            saved_recommendation = self._save_recommendation(
-                user_id=user_id,
-                recommendation_text=recommendation_text,
-                device_id=None,
-            )
-
-            return {
-                "success": True,
-                "status": "success_no_shiftable_devices",
-                "code": "NO_SHIFTABLE_DEVICES",
-                "message": "Best period found, but no shiftable devices exist for this user.",
-                "user_id": user_id,
-                "window_days": 7,
-                "best_period": best_period,
-                "best_period_avg_production": round(best_period_avg, 4),
-                "period_averages": self._round_dict_values(avg_production_by_period),
-                "matched_device": None,
-                "recommendation": saved_recommendation,
-            }
-
-        # 6) Choose best matching device
-        matched_device = self._choose_closest_device(
-            devices=shiftable_devices,
-            target_period=best_period,
-            target_kwh=best_period_avg,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        # 7) Build recommendation text
-        recommendation_text = self._build_recommendation_text(
-            best_period=best_period,
-            best_period_avg_production=best_period_avg,
-            matched_device=matched_device,
-        )
-
-        # 8) Save recommendation
-        saved_recommendation = self._save_recommendation(
-            user_id=user_id,
-            recommendation_text=recommendation_text,
-            device_id=matched_device["device_id"] if matched_device else None,
-        )
-
-        return {
-            "success": True,
-            "status": "success",
-            "code": "RECOMMENDATION_GENERATED",
-            "message": "Recommendation generated successfully.",
-            "user_id": user_id,
-            "window_days": 7,
-            "best_period": best_period,
-            "best_period_avg_production": round(best_period_avg, 4),
-            "period_averages": self._round_dict_values(avg_production_by_period),
-            "matched_device": matched_device,
-            "recommendation": saved_recommendation,
-        }
+        if has_solar:
+            return self._generate_solar_recommendation(user_id)
+        else:
+            return self._generate_general_recommendation(user_id)
 
     def get_latest_recommendation(self, user_id: str) -> Dict[str, Any]:
         response = (
@@ -198,8 +91,197 @@ class RecommendationService:
         }
 
     # =========================================================
+    # Solar Recommendation (Grid + Solar users)
+    # =========================================================
+
+    def _generate_solar_recommendation(self, user_id: str) -> Dict[str, Any]:
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=7)
+
+        # 1) Get production devices
+        production_devices = self._get_devices_by_type(
+            user_id=user_id,
+            device_type="production",
+        )
+
+        if not production_devices:
+            # Solar user but no production devices → fall back to general
+            return self._generate_general_recommendation(
+                user_id=user_id,
+                fallback_reason="NO_PRODUCTION_DEVICES",
+            )
+
+        production_device_ids = [d["device_id"] for d in production_devices]
+
+        # 2) Get solar readings for last 7 days
+        solar_rows = self._get_sensor_rows_for_devices(
+            device_ids=production_device_ids,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        if not solar_rows:
+            return self._generate_general_recommendation(
+                user_id=user_id,
+                fallback_reason="NO_SOLAR_READINGS",
+            )
+
+        # 3) Average production by period
+        avg_production_by_period = self._average_kwh_by_period(solar_rows)
+
+        if not avg_production_by_period:
+            return self._generate_general_recommendation(
+                user_id=user_id,
+                fallback_reason="NO_VALID_SOLAR_PERIODS",
+            )
+
+        # 4) Best period
+        best_period, best_period_avg = self._find_best_period(avg_production_by_period)
+
+        if best_period is None:
+            return self._generate_general_recommendation(
+                user_id=user_id,
+                fallback_reason="BEST_PERIOD_NOT_FOUND",
+            )
+
+        # 5) Shiftable devices
+        shiftable_devices = self._get_shiftable_consumption_devices(user_id)
+
+        # 6) Choose best matching device
+        matched_device = None
+        if shiftable_devices:
+            matched_device = self._choose_closest_device(
+                devices=shiftable_devices,
+                target_period=best_period,
+                target_kwh=best_period_avg,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+        # 7) Build solar recommendation text
+        solar_text = self._build_recommendation_text(
+            best_period=best_period,
+            best_period_avg_production=best_period_avg,
+            matched_device=matched_device,
+        )
+
+        # 8) Pick a general recommendation and combine
+        general_text = self._get_random_general_text()
+        final_text = solar_text
+        if general_text:
+            final_text = f"{solar_text} Additionally: {general_text}"
+
+        # 9) Save
+        saved = self._save_recommendation(
+            user_id=user_id,
+            recommendation_text=final_text,
+            device_id=matched_device["device_id"] if matched_device else None,
+        )
+
+        return {
+            "success": True,
+            "status": "success",
+            "code": "RECOMMENDATION_GENERATED",
+            "message": "Recommendation generated successfully.",
+            "user_id": user_id,
+            "user_type": "solar",
+            "window_days": 7,
+            "best_period": best_period,
+            "best_period_avg_production": round(best_period_avg, 4),
+            "period_averages": self._round_dict_values(avg_production_by_period),
+            "matched_device": matched_device,
+            "recommendation": saved,
+        }
+
+    # =========================================================
+    # General Recommendation (Grid only users OR solar fallback)
+    # =========================================================
+
+    def _generate_general_recommendation(
+        self,
+        user_id: str,
+        fallback_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        general_text = self._get_random_general_text()
+
+        if not general_text:
+            return {
+                "success": False,
+                "status": "empty",
+                "code": "NO_GENERAL_RECOMMENDATIONS",
+                "message": "No general recommendations found in the database.",
+                "user_id": user_id,
+                "user_type": "grid_only",
+                "recommendation": None,
+            }
+
+        saved = self._save_recommendation(
+            user_id=user_id,
+            recommendation_text=general_text,
+            device_id=None,
+        )
+
+        return {
+            "success": True,
+            "status": "success",
+            "code": "GENERAL_RECOMMENDATION_GENERATED",
+            "message": "General recommendation generated successfully.",
+            "user_id": user_id,
+            "user_type": "grid_only",
+            "fallback_reason": fallback_reason,
+            "recommendation": saved,
+        }
+
+    # =========================================================
+    # General Recommendations Table Helpers
+    # =========================================================
+
+    def _get_random_general_text(self) -> Optional[str]:
+        """Fetch all general recommendations and pick one at random."""
+        try:
+            response = (
+                self.supabase.table("general_recommendations")
+                .select("recommendation_text")
+                .execute()
+            )
+            rows = response.data or []
+            if not rows:
+                return None
+            chosen = random.choice(rows)
+            return chosen.get("recommendation_text")
+        except Exception:
+            return None
+
+    # =========================================================
+    # User Profile Helpers
+    # =========================================================
+
+    def _get_user_profile(self, user_id: str) -> Optional[dict]:
+        try:
+            response = (
+                self.supabase.table("users")
+                .select("has_solar_panels, energy_source")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            data = response.data or []
+            return data[0] if data else None
+        except Exception:
+            return None
+
+    def _user_has_solar(self, profile: Optional[dict]) -> bool:
+        if not profile:
+            return False
+        has_solar_panels = profile.get("has_solar_panels")
+        energy_source = profile.get("energy_source", "")
+        # True only if explicitly has solar panels AND energy source includes Solar
+        return bool(has_solar_panels) and "solar" in (energy_source or "").lower()
+
+    # =========================================================
     # Database Helpers
     # =========================================================
+
     def _get_devices_by_type(self, user_id: str, device_type: str) -> List[dict]:
         response = (
             self.supabase.table("device")
@@ -272,6 +354,7 @@ class RecommendationService:
     # =========================================================
     # Core Logic Helpers
     # =========================================================
+
     def _parse_timestamp(self, value: str) -> datetime:
         if value.endswith("Z"):
             value = value.replace("Z", "+00:00")
@@ -279,7 +362,6 @@ class RecommendationService:
 
     def _get_period(self, dt: datetime) -> str:
         hour = dt.hour
-
         if 6 <= hour < 10:
             return self.PERIOD_MORNING
         if 10 <= hour < 14:
@@ -314,10 +396,11 @@ class RecommendationService:
 
         return averages
 
-    def _find_best_period(self, averages: Dict[str, float]) -> Tuple[Optional[str], float]:
+    def _find_best_period(
+        self, averages: Dict[str, float]
+    ) -> Tuple[Optional[str], float]:
         if not averages:
             return None, 0.0
-
         best_period = max(averages, key=averages.get)
         return best_period, averages[best_period]
 
@@ -352,14 +435,10 @@ class RecommendationService:
             except (ValueError, TypeError):
                 continue
 
-            period = self._get_period(ts)
-            if period == target_period:
+            if self._get_period(ts) == target_period:
                 values.append(kwh)
 
-        if not values:
-            return None
-
-        return sum(values) / len(values)
+        return sum(values) / len(values) if values else None
 
     def _choose_closest_device(
         self,
@@ -374,8 +453,6 @@ class RecommendationService:
 
         for device in devices:
             device_id = device.get("device_id")
-            device_name = device.get("device_name", "Unknown Device")
-
             if device_id is None:
                 continue
 
@@ -393,7 +470,7 @@ class RecommendationService:
 
             candidate = {
                 "device_id": device_id,
-                "device_name": device_name,
+                "device_name": device.get("device_name", "Unknown Device"),
                 "device_type": device.get("device_type"),
                 "is_shiftable": device.get("is_shiftable"),
                 "avg_consumption": round(avg_consumption, 4),
@@ -430,6 +507,7 @@ class RecommendationService:
     # =========================================================
     # Response Helpers
     # =========================================================
+
     def _build_empty_response(
         self,
         code: str,

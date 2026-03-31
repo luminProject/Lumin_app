@@ -11,20 +11,28 @@ Responsibilities:
 - Create Supabase connection
 - Initialize LuminFacade
 - Register profile routes
+- Start the recommendation scheduler (3 PM + 7 PM Saudi time)
 - Provide endpoints for devices, energy, billing, forecasts, etc.
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 import os
+import logging
 from dotenv import load_dotenv
 
 from app.routers import router as profile_router
 from app.routers.recommendation_router import router as recommendation_router
 from app.core.lumin_facade import LuminFacade
+from app.scheduler import create_scheduler
 import supabase as supabase_
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # -----------------------------
@@ -57,9 +65,28 @@ facade = LuminFacade(supabase)
 
 
 # -----------------------------
+# Scheduler Lifespan
+# -----------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Starts the APScheduler when the server starts,
+    and shuts it down cleanly when the server stops.
+    """
+    scheduler = create_scheduler()
+    scheduler.start()
+    logger.info("✅ Scheduler started — recommendations at 3 PM and 7 PM (Saudi time).")
+
+    yield  # Server is running
+
+    scheduler.shutdown()
+    logger.info("🛑 Scheduler stopped.")
+
+
+# -----------------------------
 # FastAPI Application
 # -----------------------------
-app = FastAPI(title="LUMIN Backend")
+app = FastAPI(title="LUMIN Backend", lifespan=lifespan)
 
 
 # -----------------------------
