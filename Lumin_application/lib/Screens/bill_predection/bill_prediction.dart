@@ -19,8 +19,13 @@ class BillPredictionPage extends StatefulWidget {
 class _BillPredictionPageState extends State<BillPredictionPage> {
   final ApiService _api = ApiService();
 
+  // ---------------------------
+  // DATA COMING FROM BACKEND
+  // ---------------------------
+  // These values are NOT calculated in Flutter.
+  // They come ready from the backend endpoint: GET /bill/{user_id}
   double? _billLimit;
-  bool _overLimitAlert = false;
+  bool _limitWarning = false;
   bool _forecastReady = false;
 
   double _currentBill = 0;
@@ -28,23 +33,32 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   double _currentUsage = 0;
   double _predictedUsage = 0;
 
-  int _daysPassed = 0;
-  int _daysInMonth = 30;
+  // UI-only value:
+  // We use this only to show the latest refresh time on screen.
   DateTime _lastUpdated = DateTime.now();
 
+  // ---------------------------
+  // UI STATE
+  // ---------------------------
   bool _isLoading = true;
   bool _isSaving = false;
   String? _errorMessage;
 
+  // Auto refresh timer for the page.
   Timer? _refreshTimer;
 
+  // Controller for bill limit input field.
   final TextEditingController _billLimitController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+
+    // Load data when page opens.
     _loadBillData();
 
+    // Auto refresh every 30 seconds.
+    // This refreshes displayed values from backend.
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
       _loadBillData(isAutoRefresh: true);
@@ -58,10 +72,25 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     super.dispose();
   }
 
+  // True if the user already has a valid monthly bill limit.
   bool get _hasBillLimit => _billLimit != null && _billLimit! > 0;
 
-  String _formatFixedRange(double centerValue, double halfRange,
-      {int decimals = 0}) {
+  // ---------------------------
+  // FRONTEND DISPLAY HELPERS
+  // ---------------------------
+  // Backend returns one predicted bill number and one predicted usage number.
+  // In the UI, we show them as a small range for better presentation.
+  // Example:
+  // predicted bill  = 250  -> shown as 240–260
+  // predicted usage = 900  -> shown as 800–1000
+  //
+  // This range is only for UI display.
+  // It is NOT the actual forecast calculation.
+  String _formatFixedRange(
+    double centerValue,
+    double halfRange, {
+    int decimals = 0,
+  }) {
     if (!_forecastReady || centerValue <= 0) return '--';
 
     final minValue = math.max(0, centerValue - halfRange);
@@ -74,80 +103,28 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     return '${minValue.toStringAsFixed(decimals)}–${maxValue.toStringAsFixed(decimals)}';
   }
 
-  double get _predictedBillMin {
-    if (!_forecastReady || _predictedBill <= 0) return 0;
-    return math.max(0, _predictedBill - 10);
-  }
-
-  double get _predictedBillMax {
-    if (!_forecastReady || _predictedBill <= 0) return 0;
-    return _predictedBill + 10;
-  }
-
-  double get _predictedUsageMin {
-    if (!_forecastReady || _predictedUsage <= 0) return 0;
-    return math.max(0, _predictedUsage - 100);
-  }
-
-  double get _predictedUsageMax {
-    if (!_forecastReady || _predictedUsage <= 0) return 0;
-    return _predictedUsage + 100;
-  }
-
+  // Predicted bill range shown in UI only.
   String get _predictedBillRangeText {
     return _formatFixedRange(_predictedBill, 10, decimals: 0);
   }
 
+  // Predicted usage range shown in UI only.
   String get _predictedUsageRangeText {
     return _formatFixedRange(_predictedUsage, 100, decimals: 0);
   }
 
-  String get _predictedBillMinText {
-    if (!_forecastReady) return '--';
-    return '${_predictedBillMin.round()}';
-  }
-
-  String get _predictedBillMaxText {
-    if (!_forecastReady) return '--';
-    return '${_predictedBillMax.round()}';
-  }
-
-  bool get _willLikelyExceedLimit {
-    if (!_hasBillLimit || !_forecastReady) return false;
-    return _predictedBillMin > _billLimit!;
-  }
-
-  bool get _mayExceedLimit {
-    if (!_hasBillLimit || !_forecastReady) return false;
-    return _predictedBillMin <= _billLimit! && _predictedBillMax > _billLimit!;
-  }
-
-  bool get _isSafelyBelowLimit {
-    if (!_hasBillLimit || !_forecastReady) return false;
-    return _predictedBillMax <= _billLimit!;
-  }
-
-  bool get _isOverLimit {
-    if (!_hasBillLimit || !_forecastReady) return false;
-    return _predictedBillMax > _billLimit!;
-  }
-
-  double get _differenceFromLimit {
-    if (!_hasBillLimit || !_forecastReady) return 0;
-    return _predictedBillMax - _billLimit!;
-  }
-
-  double get _remainingToLimit {
-    if (!_hasBillLimit || !_forecastReady) return 0;
-    final value = _billLimit! - _predictedBillMax;
-    return value < 0 ? 0 : value;
-  }
-
+  // Used for the circular progress ring.
+  // This is only a visual ratio:
+  // predicted bill / bill limit
+  //
+  // Example:
+  // predicted = 200, limit = 400 => 0.5 progress
   double get _forecastRatioRaw {
     if (!_hasBillLimit || !_forecastReady || _billLimit! <= 0) return 0;
-    return _predictedBillMax / _billLimit!;
+    return (_predictedBill + 10) / _billLimit!;
   }
 
+  // Month label shown in header.
   String get _monthLabel {
     const months = <String>[
       'January',
@@ -166,6 +143,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     return '${months[_lastUpdated.month - 1]} ${_lastUpdated.year}';
   }
 
+  // Time label shown as "Updated at ..."
   String get _formattedUpdatedTime {
     final hour = _lastUpdated.hour > 12
         ? _lastUpdated.hour - 12
@@ -175,6 +153,14 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     return '$hour:$minute $period';
   }
 
+  // Status message shown under the main forecast circle.
+  //
+  // Important:
+  // We do NOT re-calculate warning logic in frontend.
+  // We trust the backend value: _limitWarning
+  //
+  // Why?
+  // Because the backend is the source of truth for forecast logic.
   String get _statusText {
     if (!_forecastReady) {
       return 'Your first forecast will be available after 7 recorded days.';
@@ -184,24 +170,20 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
       return 'Set a monthly bill limit to compare the forecast against your budget.';
     }
 
-    if (_willLikelyExceedLimit) {
+    if (_limitWarning) {
       return 'You are likely to exceed your limit';
     }
 
-    if (_mayExceedLimit) {
-      return 'You may exceed your limit';
-    }
-
-    if (_isSafelyBelowLimit) {
-      return 'You are on track to stay ${_remainingToLimit.round()} ﷼ below your limit';
-    }
-
-    return 'Forecast updated';
+    return 'You are still within your limit';
   }
 
+  // ---------------------------
+  // LOAD BILL DATA FROM BACKEND
+  // ---------------------------
   Future<void> _loadBillData({bool isAutoRefresh = false}) async {
     if (!mounted) return;
 
+    // Show loading only for normal page load, not silent auto refresh.
     if (!isAutoRefresh) {
       setState(() {
         _isLoading = true;
@@ -219,6 +201,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
       if (!mounted) return;
 
       setState(() {
+        // These values come directly from backend.
         _currentBill = ((data['actual_bill'] ?? 0) as num).toDouble();
         _predictedBill = ((data['predicted_bill'] ?? 0) as num).toDouble();
         _currentUsage = ((data['current_usage_kwh'] ?? 0) as num).toDouble();
@@ -228,11 +211,16 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
         _billLimit =
             (parsedLimit != null && parsedLimit > 0) ? parsedLimit : null;
 
-        _overLimitAlert = data['limit_warning'] ?? false;
+        // This warning is decided by backend.
+        // Frontend only displays it.
+        _limitWarning = data['limit_warning'] ?? false;
+
+        // Forecast availability also comes from backend.
         _forecastReady = data['forecast_available'] ?? false;
-        _daysPassed = data['days_passed'] ?? 0;
-        _daysInMonth = data['days_in_month'] ?? 30;
+
+        // UI refresh timestamp only.
         _lastUpdated = DateTime.now();
+
         _errorMessage = null;
       });
     } catch (e) {
@@ -256,6 +244,9 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     }
   }
 
+  // ---------------------------
+  // SAVE MONTHLY BILL LIMIT
+  // ---------------------------
   Future<void> _saveBillLimit(double limit) async {
     setState(() {
       _isSaving = true;
@@ -271,6 +262,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
       if (!mounted) return;
 
       setState(() {
+        // Refresh state from backend response after saving.
         _currentBill = ((data['actual_bill'] ?? 0) as num).toDouble();
         _predictedBill = ((data['predicted_bill'] ?? 0) as num).toDouble();
         _currentUsage = ((data['current_usage_kwh'] ?? 0) as num).toDouble();
@@ -280,10 +272,8 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
         _billLimit =
             (parsedLimit != null && parsedLimit > 0) ? parsedLimit : null;
 
-        _overLimitAlert = data['limit_warning'] ?? false;
+        _limitWarning = data['limit_warning'] ?? false;
         _forecastReady = data['forecast_available'] ?? false;
-        _daysPassed = data['days_passed'] ?? 0;
-        _daysInMonth = data['days_in_month'] ?? 30;
         _lastUpdated = DateTime.now();
       });
 
@@ -306,6 +296,9 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     }
   }
 
+  // ---------------------------
+  // OPEN BOTTOM SHEET FOR BILL LIMIT
+  // ---------------------------
   void _openSetBillLimitSheet() {
     _billLimitController.text = _billLimit?.round().toString() ?? '';
 
@@ -474,7 +467,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                                 ? 'Predicted Bill'
                                 : 'Forecast Status',
                             rightValue: _forecastReady
-                                ? '${_predictedBillRangeText} ﷼'
+                                ? '$_predictedBillRangeText ﷼'
                                 : '--',
                             rightUnit: _forecastReady
                                 ? 'Expected by month-end'
@@ -495,8 +488,6 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                                 : 'Need 7 days',
                           ),
                           const SizedBox(height: 14),
-                          _buildAlertCard(),
-                          const SizedBox(height: 14),
                           _buildLimitCard(),
                         ],
                       ),
@@ -506,6 +497,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     );
   }
 
+  // Top small header card.
   Widget _buildForecastHeader() {
     return GlassCard(
       padding: const EdgeInsets.all(16),
@@ -557,26 +549,29 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     );
   }
 
+  // Main hero card with circle and status.
   Widget _buildHeroForecastCard() {
+    final bool isWarning = _limitWarning;
+
     final Color ringColor = !_forecastReady
         ? Colors.white.withOpacity(0.20)
         : (_hasBillLimit
-            ? (_willLikelyExceedLimit || _mayExceedLimit
-                ? const Color(0xFFFF5A5F)
-                : AppColors.mint)
+            ? (isWarning ? const Color(0xFFFF5A5F) : AppColors.mint)
             : Colors.white.withOpacity(0.28));
 
     final Color valueColor = !_forecastReady
         ? Colors.white70
         : (_hasBillLimit
-            ? (_willLikelyExceedLimit || _mayExceedLimit
-                ? const Color(0xFFFF5A5F)
-                : AppColors.mint)
+            ? (isWarning ? const Color(0xFFFF5A5F) : AppColors.mint)
             : AppColors.mint);
 
     final double progressForCircle = (_hasBillLimit && _forecastReady)
         ? _forecastRatioRaw.clamp(0.0, 1.0)
         : 0.0;
+
+    // Replace en dash with "to" so it fits the center text more clearly.
+    final String billRangeText =
+        _forecastReady ? _predictedBillRangeText.replaceAll('–', ' to ') : '--';
 
     return GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
@@ -615,33 +610,13 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                _predictedBillMinText,
+                                billRangeText,
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: valueColor,
-                                  fontSize: 24,
+                                  fontSize: 22,
                                   fontWeight: FontWeight.w900,
-                                  height: 1,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'to',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.70),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _predictedBillMaxText,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: valueColor,
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1,
+                                  height: 1.15,
                                 ),
                               ),
                               const SizedBox(height: 6),
@@ -712,9 +687,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
             _statusText,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: _forecastReady && (_willLikelyExceedLimit || _mayExceedLimit)
-                  ? Colors.orangeAccent
-                  : AppColors.mint,
+              color: isWarning ? Colors.orangeAccent : AppColors.mint,
               fontSize: 13,
               fontWeight: FontWeight.w800,
             ),
@@ -759,6 +732,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     );
   }
 
+  // Reusable double-stat card.
   Widget _buildDoubleStatCard({
     required String title,
     required IconData leadingIcon,
@@ -877,69 +851,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     );
   }
 
-  Widget _buildAlertCard() {
-    final bool enabled = _hasBillLimit && _forecastReady;
-
-    return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      radius: 18,
-      child: Opacity(
-        opacity: enabled ? 1.0 : 0.55,
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                Icons.warning_amber_rounded,
-                color: Colors.orange.withOpacity(0.95),
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Over-Limit Alert',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14.5,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    enabled
-                        ? 'Notify me if the forecast exceeds my monthly limit'
-                        : 'Alert available after forecast becomes ready',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.62),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Switch(
-              value: enabled ? _overLimitAlert : false,
-              activeThumbColor: AppColors.button,
-              onChanged: enabled
-                  ? (v) => setState(() => _overLimitAlert = v)
-                  : null,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // Card for showing and editing bill limit.
   Widget _buildLimitCard() {
     return GlassCard(
       padding: const EdgeInsets.all(16),
@@ -993,6 +905,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     );
   }
 
+  // Small reusable info chip.
   Widget _infoChip({
     required IconData icon,
     required String text,
@@ -1027,6 +940,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   }
 }
 
+// Custom painter for circular forecast ring.
 class CircularForecastPainter extends CustomPainter {
   final double progress;
   final Color color;
@@ -1059,6 +973,7 @@ class CircularForecastPainter extends CustomPainter {
     const startAngle = -math.pi / 2;
     const totalSweep = math.pi * 2;
 
+    // Background circle.
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
       startAngle,
@@ -1067,6 +982,7 @@ class CircularForecastPainter extends CustomPainter {
       backgroundPaint,
     );
 
+    // Progress circle.
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
       startAngle,

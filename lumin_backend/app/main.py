@@ -18,6 +18,7 @@ Responsibilities:
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.Bill_scheduler import setup_scheduler, shutdown_scheduler
 from pydantic import BaseModel
 from datetime import datetime
 import os
@@ -63,31 +64,36 @@ supabase = supabase_.create_client(SUPABASE_URL, SUPABASE_KEY)
 # Facade instance (central system interface)
 facade = LuminFacade(supabase)
 
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 
-# -----------------------------
-# Scheduler Lifespan
-# -----------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Starts the APScheduler when the server starts,
-    and shuts it down cleanly when the server stops.
+    Start both schedulers when the server starts,
+    and shut them down cleanly when the server stops.
     """
-    scheduler = create_scheduler()
-    scheduler.start()
-    logger.info("✅ Scheduler started — recommendations at 3 PM and 7 PM (Saudi time).")
+
+    # Recommendation scheduler
+    recommendation_scheduler = create_scheduler()
+    recommendation_scheduler.start()
+    logger.info("✅ Recommendation scheduler started — runs at 3 PM and 7 PM Saudi time.")
+
+    # Bill scheduler
+    setup_scheduler(facade)
+    logger.info("✅ Bill scheduler started.")
 
     yield  # Server is running
 
-    scheduler.shutdown()
-    logger.info("🛑 Scheduler stopped.")
+    # Shutdown both schedulers
+    recommendation_scheduler.shutdown()
+    logger.info("🛑 Recommendation scheduler stopped.")
+
+    shutdown_scheduler()
+    logger.info("🛑 Bill scheduler stopped.")
 
 
-# -----------------------------
-# FastAPI Application
-# -----------------------------
 app = FastAPI(title="LUMIN Backend", lifespan=lifespan)
-
 
 # -----------------------------
 # CORS Configuration
@@ -237,23 +243,44 @@ def delete_device(device_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # -----------------------------
 # Billing Endpoint
 # -----------------------------
+class BillLimitIn(BaseModel):
+    limit_amount: float
 @app.get("/bill/{user_id}")
-def get_bill(user_id: str):
-    """
-    Calculate current electricity bill estimate.
-    """
+def get_my_current_bill(user_id: str):
     try:
-        return {
-            "status": "success",
-            "data": facade.get_my_current_bill(user_id)
-        }
+        return {"status": "success", 
+                "data": facade.get_my_current_bill(user_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/bill/{user_id}")
+def set_bill_limit(user_id: str, payload: BillLimitIn):
+    facade.set_bill_limit(user_id, payload.limit_amount)
+    try:
+        return {"status": "success", "data": facade.get_my_current_bill(user_id) }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/internal/run-bill-checkpoint/{checkpoint_day}")
+def run_bill_checkpoint_manually(checkpoint_day: int):
+    try:
+        if checkpoint_day not in [7, 14, 21, 28]:
+            raise HTTPException(status_code=400, detail="checkpoint_day must be 7, 14, 21, or 28")
+        print(f"✅ Job triggered (day {checkpoint_day})")
+        return {
+            "status": "success",
+            "data": facade.run_bill_checkpoint_for_all_users(checkpoint_day)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
 
 # -----------------------------
 # Solar Forecast Endpoint

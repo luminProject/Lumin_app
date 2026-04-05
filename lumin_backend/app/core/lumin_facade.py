@@ -8,7 +8,8 @@ from app.models.user import User
 
 from app.models.energy_calculation import EnergyCalculation
 from app.models.notification import Notification
-from app.models.bill_prediction import BillPrediction, Tariff018Strategy
+from app.models.bill_prediction import BillPrediction
+from app.core.database_manager import DatabaseManager
 class LuminFacade:
     """
     Single Facade that aggregates all subsystems as required in the LUMIN report
@@ -25,6 +26,7 @@ class LuminFacade:
     """
     def __init__(self, supabase_client):
         self.supabase = supabase_client
+        self.db = DatabaseManager(supabase_client)
 
     # -----------------------------
     # SENSOR READING (Week 3: Sensor Reading endpoint support)
@@ -212,84 +214,124 @@ class LuminFacade:
     # -----------------------------
     # BILL PREDICTION
     # -----------------------------
-    def set_bill_limit(self, user_id: str, limit: int) -> Dict[str, Any]:
-        bill_manager = BillPrediction(
-            strategy=Tariff018Strategy(),
-            limit_id=0,
-            actual_bill=0.0,
-            predicted_bill=0.0,
-            user_id=user_id,
-            set_date=date.today(),
-            limit_amount=0.0,
-            supabase=self.supabase,
-        )
-        bill_manager.loadCurrentMonth()
+
+    def set_bill_limit(self, user_id: str, limit: int | float) -> None:
+        current_bill_row = self.db.get_current_month_bill_row(user_id)
+
+        bill_manager = BillPrediction(user_id)
+        bill_manager.loadCurrentMonth(current_bill_row)
         bill_manager.setLimit(limit)
 
-        return {
-            "user_id": user_id,
-            "limit_id": bill_manager.limit_id,
-            "limit_amount": bill_manager.limit_amount,
-            "set_date": bill_manager.set_date.isoformat(),
-        }
+        payload = bill_manager.build_db_payload()
+        saved_limit_id = self.db.save_current_month_bill(user_id, payload)
+        bill_manager.setLimitId(saved_limit_id)
+
+       
 
     def get_my_current_bill(self, user_id: str) -> Dict[str, Any]:
-        energy_monitor = EnergyCalculation(
-            Energy_id=0,
-            date=date.today(),
-            total_consumption=0.0,
-            total_production=0.0,
-            cost_savings=0.0,
-            carbon_reduction=0.0,
-            user_id=user_id,
-            supabase=self.supabase,
+        """
+        GET /bill:
+        update current values only
+        """
+        energy_rows = self.db.get_current_month_energy_rows(user_id)
+        current_bill_row = self.db.get_current_month_bill_row(user_id)
+
+        energy_monitor = EnergyCalculation(user_id)
+        bill_data = energy_monitor.get_current_month_usage(rows=energy_rows)
+
+        bill_manager = BillPrediction(user_id)
+        bill_manager.loadCurrentMonth(current_bill_row)
+        bill_manager.syncActualFromBillData(bill_data)
+
+        payload = bill_manager.build_db_payload()
+        saved_limit_id = self.db.save_current_month_bill(user_id, payload)
+        bill_manager.setLimitId(saved_limit_id)
+
+        return bill_manager.to_dict()
+
+        
+
+
+    def run_bill_checkpoint_for_user(self, user_id: str, checkpoint_day: int) -> Dict[str, Any]:
+        """
+        Called by APScheduler.
+        Official forecast logic stays inside BillPrediction.
+        """
+
+        # 1) get all current month rows
+        energy_rows = self.db.get_current_month_energy_rows(user_id)
+        current_bill_row = self.db.get_current_month_bill_row(user_id)
+
+        # 2) build cutoff date = end of checkpoint day
+        today = DateType.today()
+        cutoff_date = today.replace(day=checkpoint_day)
+
+        # 3) keep only rows up to checkpoint day
+        filtered_rows = []
+        for row in energy_rows:
+            row_date = row.get("date")
+            if not row_date:
+                continue
+
+            row_date_only = DateType.fromisoformat(str(row_date)[:10])
+
+            if row_date_only <= cutoff_date:
+                filtered_rows.append(row)
+
+        # 4) build monthly summary only from filtered rows
+        energy_monitor = EnergyCalculation(user_id)
+        bill_data = energy_monitor.get_current_month_usage(rows=filtered_rows)
+
+        # 5) load current bill state
+        bill_manager = BillPrediction(user_id)
+        bill_manager.loadCurrentMonth(current_bill_row)
+
+        # 6) run scheduled checkpoint
+        bill_manager.runScheduledCheckpoint(
+            checkpoint_day=checkpoint_day,
+            bill_data=bill_data,
         )
-        bill_data = energy_monitor.viewSummary()
 
-        bill_manager = BillPrediction(
-            strategy=Tariff018Strategy(),
-            limit_id=0,
-            actual_bill=0.0,
-            predicted_bill=0.0,
-            user_id=user_id,
-            set_date=date.today(),
-            limit_amount=0.0,
-            supabase=self.supabase,
-        )
-        bill_manager.loadCurrentMonth()
-        bill_manager.updatePrediction(bill_data)
+        # 7) optional warning notification
+        current_warning = bill_manager.compareActualWithPredicted()
 
-        warning_status = bill_manager.compareActualWithPredicted()
-
-        if warning_status == 1:
+        if current_warning == 1:
             notification = Notification(
                 notification_id=0,
                 content="",
                 notification_type="bill_warning",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.datetime.utcnow(),
                 user_id=user_id,
                 supabase=self.supabase,
             )
             notification.setContent(
-                f"Your predicted bill ({bill_manager.predicted_bill} SAR) may exceed your limit ({bill_manager.limit_amount} SAR)."
+                f"Warning: your predicted bill range ({bill_manager.Get_predicted_bill()} SAR) may exceed your monthly limit ({bill_manager.Get_limit_amount()} SAR)."
             )
             notification.sendNotification()
 
+        # 8) save updated state
+        payload = bill_manager.build_db_payload()
+        saved_limit_id = self.db.save_current_month_bill(user_id, payload)
+        bill_manager.setLimitId(saved_limit_id)
+
+        return bill_manager.to_dict()
+    def run_bill_checkpoint_for_all_users(self, checkpoint_day: int) -> Dict[str, Any]:
+        if checkpoint_day not in [7, 14, 21, 28]:
+            raise ValueError("checkpoint_day must be one of: 7, 14, 21, 28")
+
+        user_ids = self.db.get_users_with_current_month_energy()
+        processed_users = 0
+
+        for user_id in user_ids:
+            self.run_bill_checkpoint_for_user(user_id, checkpoint_day)
+            processed_users += 1
+
         return {
-    "user_id": user_id,
-    "limit_id": bill_manager.limit_id,
-    "limit_amount": bill_manager.limit_amount,
-    "actual_bill": bill_manager.actual_bill,
-    "predicted_bill": bill_manager.predicted_bill,
-    "set_date": bill_manager.set_date.isoformat(),
-    "tariff_strategy": bill_manager.strategy.__class__.__name__,
-    "limit_warning": True if warning_status == 1 else False,
-    "current_usage_kwh": bill_manager.actual_usage_kwh,
-    "predicted_usage_kwh": bill_manager.predicted_usage_kwh,
-    "days_passed": bill_data.get("days_passed", 0),
-    "days_in_month": bill_data.get("days_in_month", 30),
-    "forecast_available": bill_data.get("days_passed", 0) >= 7,
-}
+            "status": "success",
+            "checkpoint_day": checkpoint_day,
+            "processed_users": processed_users,
+        }
+  
     # -----------------------------
     # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS 
     # -----------------------------

@@ -36,9 +36,16 @@ class EnergyCalculation(Observer):
     # ربط Supabase
     supabase: Any = None
 
-    def __post_init__(self):
-        if self.TARIF is None:
-            self.TARIF = [0.18, 0.30]
+    def __init__(self, user_id: str):
+        self.Energy_id = 0
+        self.date = DateType.today()
+        self.total_consumption = 0.0
+        self.total_production = 0.0
+        self.cost_savings = 0.0
+        self.carbon_reduction = 0.0
+        self.user_id = user_id
+        self.TARIF = [0.18, 0.30]
+
 
     # +calculateEnergy():void
     def calculateEnergy(self) -> None:
@@ -61,39 +68,43 @@ class EnergyCalculation(Observer):
     # +viewSummary(interval: Duration):void
 
     def viewSummary(self, interval=None) -> dict:
-        if self.supabase is None:
-            today = DateType.today()
-            days_in_month = monthrange(today.year, today.month)[1]
+        return None
+    # +displayRealTimeEnergy():void
+    def displayRealTimeEnergy(self) -> dict:
+        return self.viewSummary(None)
+
+    # +update():void
+    def update(self, o=None) -> None:
+        self.calculateEnergy()
+        return None
+
+# +getCurrentMonthUsage(): dict 
+# this is the main method that transforms raw energy rows into a clean monthly usage summary for bill prediction.
+    def get_current_month_usage(self, rows: list[dict] | None = None) -> dict:
+        """
+        Business logic only.
+
+        Receives raw monthly energy rows that were already fetched
+        by DatabaseManager, then transforms them into a clean monthly
+        usage summary ready for bill prediction.
+        """
+        today = DateType.today()
+        billing_month = today.replace(day=1)
+        days_in_month = monthrange(today.year, today.month)[1]
+
+        if not rows:
             return {
                 "user_id": str(self.user_id),
                 "energy_id": self.Energy_id,
                 "date": today.isoformat(),
+                "billing_month": billing_month.isoformat(),
                 "days_passed": 0,
                 "days_in_month": days_in_month,
                 "daily_net_values": [],
                 "current_usage_kwh": 0.0,
             }
 
-        today = DateType.today()
-        month_start = today.replace(day=1)
-
-        if today.month == 12:
-            next_month_start = DateType(today.year + 1, 1, 1)
-        else:
-            next_month_start = DateType(today.year, today.month + 1, 1)
-
-        rows = (
-            self.supabase
-            .table("energycalculation")
-            .select("calculation_id, date, total_consumption, solar_production")
-            .eq("user_id", str(self.user_id))
-            .gte("date", month_start.isoformat())
-            .lt("date", next_month_start.isoformat())
-            .order("date", desc=False)
-            .execute()
-        ).data or []
-
-        daily_map = {}
+        daily_map: dict[str, float] = {}
         latest_calculation_id = 0
 
         for row in rows:
@@ -102,9 +113,11 @@ class EnergyCalculation(Observer):
                 continue
 
             day_str = str(row_date)[:10]
-            daily_consumption = float(row.get("total_consumption") or 0)
-            daily_solar = float(row.get("solar_production") or 0)
-            daily_grid_consumption = max(daily_consumption - daily_solar, 0)
+            daily_consumption = float(row.get("total_consumption") or 0.0)
+            daily_solar = float(row.get("solar_production") or 0.0)
+
+            # Net grid usage used later by bill prediction.
+            daily_grid_consumption = max(daily_consumption - daily_solar, 0.0)
 
             daily_map[day_str] = daily_map.get(day_str, 0.0) + daily_grid_consumption
             latest_calculation_id = int(row.get("calculation_id") or latest_calculation_id)
@@ -115,30 +128,16 @@ class EnergyCalculation(Observer):
 
         self.Energy_id = latest_calculation_id
         self.total_consumption = current_usage_kwh
-        self.total_production = 0.0
-
-        days_in_month = monthrange(today.year, today.month)[1]
+        
 
         return {
             "user_id": str(self.user_id),
             "energy_id": self.Energy_id,
             "date": today.isoformat(),
+            "billing_month": billing_month.isoformat(),
             "days_passed": len(sorted_days),
             "days_in_month": days_in_month,
             "daily_net_values": daily_net_values,
             "current_usage_kwh": current_usage_kwh,
         }
-    # +displayRealTimeEnergy():void
-    def displayRealTimeEnergy(self) -> dict:
-        return self.viewSummary(None)
-
-    # +update():void
-    def update(self, o=None) -> None:
-        self.calculateEnergy()
-        return None
-
-    # ميثود عملية مخصصة للبيل
-    def getMonthlyBillData(self) -> dict:
-        return self.viewSummary(None)
-    
-    
+        

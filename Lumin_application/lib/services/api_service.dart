@@ -18,7 +18,7 @@ import 'package:flutter/foundation.dart';
 class ApiService {
 
   /// Base URL for backend depending on current platform.
-  static String get baseUrl => kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
+  static String get baseUrl => kIsWeb ? 'http://127.0.0.1:8001' : 'http://10.0.2.2:8000';
 
   // ===== Helpers =====
 
@@ -95,12 +95,22 @@ class ApiService {
   // ===== Bill =====
 
   /// GET /bill/{userId}
+
   Future<Map<String, dynamic>> getBill() async {
     final url = '$baseUrl/bill/$_userId';
-    final response = await http.get(Uri.parse(url));
-    debugPrint('GET BILL <- status=${response.statusCode} body=${response.body}');
+
+    final response = await http.get(
+      Uri.parse(url),
+      headers: authHeaders(),
+    );
+
+    debugPrint('GET BILL -> $url');
+    debugPrint('GET BILL <- status=${response.statusCode}');
+    debugPrint('GET BILL <- body=${response.body}');
+
     if (response.statusCode == 200) {
-      return json.decode(response.body)['data'];
+      final jsonResponse = json.decode(response.body);
+      return jsonResponse['data'];
     } else {
       throw Exception('Failed to load bill prediction: ${response.body}');
     }
@@ -109,14 +119,22 @@ class ApiService {
   /// POST /bill/{userId}
   Future<Map<String, dynamic>> setBillLimit(double billLimit) async {
     final url = '$baseUrl/bill/$_userId';
+
     final response = await http.post(
       Uri.parse(url),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'limit_amount': billLimit}),
+      headers: authHeaders(json: true),
+      body: json.encode({
+        'limit_amount': billLimit,
+      }),
     );
+
+    debugPrint('POST BILL LIMIT -> $url');
     debugPrint('POST BILL LIMIT <- status=${response.statusCode}');
+    debugPrint('POST BILL LIMIT <- body=${response.body}');
+
     if (response.statusCode == 200) {
-      return json.decode(response.body)['data'];
+      final jsonResponse = json.decode(response.body);
+      return jsonResponse['data'];
     } else {
       throw Exception('Failed to save bill limit: ${response.body}');
     }

@@ -2,233 +2,203 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date as DateType
-from typing import Protocol, Any
-
-
-class BillCalculationStrategy(Protocol):
-    def calculateBill(self, consumption: float) -> float: ...
-
-
-@dataclass
-class Tariff018Strategy:
-    TARIFF_RATE: float = 0.18
-
-    def calculateBill(self, consumption: float) -> float:
-        return round(float(consumption) * float(self.TARIFF_RATE), 2)
-
-
-@dataclass
-class Tariff030Strategy:
-    TARIFF_RATE: float = 0.30
-
-    def calculateBill(self, consumption: float) -> float:
-        return round(float(consumption) * float(self.TARIFF_RATE), 2)
 
 
 @dataclass
 class BillPrediction:
-    strategy: BillCalculationStrategy
-    limit_id: int
-    actual_bill: float
-    predicted_bill: float
-    user_id: str
-    set_date: DateType
-    limit_amount: float
-    actual_usage_kwh: float = 0.0
-    predicted_usage_kwh: float = 0.0
-    supabase: Any = None
+    _user_id: str
+    _actual_bill: float = 0.0
+    _predicted_bill: float = 0.0
+    _limit_amount: float = 0.0
 
-    @classmethod
-    def BillPrediction(cls, strategy: BillCalculationStrategy) -> "BillPrediction":
-        return cls(
-            strategy=strategy,
-            limit_id=0,
-            actual_bill=0.0,
-            predicted_bill=0.0,
-            user_id="",
-            set_date=DateType.today(),
-            limit_amount=0.0,
-            actual_usage_kwh=0.0,
-            predicted_usage_kwh=0.0,
-            supabase=None,
-        )
+    _actual_usage_kwh: float = 0.0
+    _predicted_usage_kwh: float = 0.0
+    _forecast_available: bool = False
+    _days_passed: int = 0
+    _days_in_month: int = 30
+    _billing_month: str | None = None
+    _limit_id: int = 0
+    _last_checkpoint_day: int | None = None
 
-    def setStrategy(self, strategy: BillCalculationStrategy) -> None:
-        self.strategy = strategy
-        return None
+    def __init__(self, user_id: str):
+        self._user_id = user_id
+        self._actual_bill = 0.0
+        self._predicted_bill = 0.0
+        self._limit_amount = 0.0
+        self._actual_usage_kwh = 0.0
+        self._predicted_usage_kwh = 0.0
+        self._forecast_available = False
+        self._days_passed = 0
+        self._days_in_month = 30
+        self._billing_month = DateType.today().replace(day=1).isoformat()
+        self._limit_id = 0
+        self._last_checkpoint_day = None
 
-    def executeStrategy(self, consumption: float) -> float:
-        return float(self.strategy.calculateBill(consumption))
+    def Get_predicted_bill(self) -> str:
+        min_value = self._predicted_bill - 10
+        if min_value < 0:
+            min_value = self._predicted_bill
+        max_value = self._predicted_bill + 10
+        return f"{int(min_value)} - {int(max_value)}"
 
-    def _get_current_month_row(self):
-        if self.supabase is None:
-            return None
+    def Get_limit_amount(self) -> int:
+        return int(self._limit_amount)
 
-        today = DateType.today()
-        month_start = today.replace(day=1).isoformat()
-
-        if today.month == 12:
-            next_month_start = DateType(today.year + 1, 1, 1).isoformat()
-        else:
-            next_month_start = DateType(today.year, today.month + 1, 1).isoformat()
-
-        rows = (
-            self.supabase
-            .table("billprediction")
-            .select("limit_id, limit_amount, actual_bill, predicted_bill, set_date")
-            .eq("user_id", self.user_id)
-            .gte("set_date", month_start)
-            .lt("set_date", next_month_start)
-            .order("set_date", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
-
-        return rows[0] if rows else None
-
-    def loadCurrentMonth(self) -> None:
-        row = self._get_current_month_row()
+    def loadCurrentMonth(self, row: dict | None) -> None:
         if not row:
+            self._billing_month = DateType.today().replace(day=1).isoformat()
             return
 
-        self.limit_id = int(row.get("limit_id") or 0)
-        self.limit_amount = float(row["limit_amount"]) if row.get("limit_amount") is not None else 0.0
-        self.actual_bill = float(row["actual_bill"]) if row.get("actual_bill") is not None else 0.0
-        self.predicted_bill = float(row["predicted_bill"]) if row.get("predicted_bill") is not None else 0.0
+        self._limit_id = int(row.get("limit_id") or 0)
+        self._limit_amount = float(row.get("limit_amount") or 0.0)
+        self._actual_bill = float(row.get("actual_bill") or 0.0)
+        self._predicted_bill = float(row.get("predicted_bill") or 0.0)
+        self._actual_usage_kwh = float(row.get("current_usage_kwh") or 0.0)
+        self._predicted_usage_kwh = float(row.get("predicted_usage_kwh") or 0.0)
+        self._forecast_available = bool(row.get("forecast_available") or False)
+        self._days_passed = int(row.get("days_passed") or 0)
+        self._days_in_month = int(row.get("days_in_month") or 30)
+        self._last_checkpoint_day = (
+            int(row["last_checkpoint_day"])
+            if row.get("last_checkpoint_day") is not None
+            else None
+        )
+        self._billing_month = (
+            row.get("billing_month")
+            or DateType.today().replace(day=1).isoformat()
+        )
 
-        row_date = row.get("set_date")
-        if row_date:
-            try:
-                self.set_date = DateType.fromisoformat(str(row_date))
-            except ValueError:
-                self.set_date = DateType.today()
+    def setLimit(self, limit: int | float) -> None:
+        self._limit_amount = max(float(limit), 0.0)
 
-    def setLimit(self, limit: int) -> None:
-        self.limit_amount = float(limit)
-        self.set_date = DateType.today()
-
-        if self.supabase is None:
-            return None
-
-        current_month_row = self._get_current_month_row()
-
-        if current_month_row:
-            self.limit_id = int(current_month_row.get("limit_id") or 0)
-            (
-                self.supabase
-                .table("billprediction")
-                .update({
-                    "limit_amount": self.limit_amount,
-                    "set_date": self.set_date.isoformat(),
-                })
-                .eq("limit_id", self.limit_id)
-                .execute()
-            )
-        else:
-            result = (
-                self.supabase
-                .table("billprediction")
-                .insert({
-                    "user_id": self.user_id,
-                    "limit_amount": self.limit_amount,
-                    "actual_bill": self.actual_bill,
-                    "predicted_bill": self.predicted_bill,
-                    "set_date": self.set_date.isoformat(),
-                    "tariff_strategy": self.strategy.__class__.__name__,
-                })
-                .execute()
-            )
-
-            data = getattr(result, "data", None) or []
-            if data:
-                self.limit_id = int(data[0].get("limit_id") or 0)
-
-        return None
-
-    def compareActualWithPredicted(self) -> int:
-        if not self.limit_amount:
-            return 0
-
-        if self.predicted_bill >= self.limit_amount:
-            return 1
-        return 0
-
-    def updatePrediction(self, bill_data) -> None:
-        if not isinstance(bill_data, dict):
-            return None
-
-        self.actual_usage_kwh = float(bill_data.get("current_usage_kwh") or 0)
-        daily_net_values = bill_data.get("daily_net_values") or []
-        days_in_month = int(bill_data.get("days_in_month") or 30)
-        days_passed = int(bill_data.get("days_passed") or 0)
-
-        self.actual_bill = float(self.calculateBill(self.actual_usage_kwh))
-
-        if days_passed < 7 or len(daily_net_values) < 7:
-            self.predicted_usage_kwh = 0.0
-            self.predicted_bill = 0.0
-            self.set_date = DateType.today()
-        else:
-            window = daily_net_values[-7:]
-            sma_daily = sum(window) / 7
-            remaining_days = max(days_in_month - days_passed, 0)
-            predicted_remaining = sma_daily * remaining_days
-            self.predicted_usage_kwh = round(self.actual_usage_kwh + predicted_remaining, 2)
-            self.predicted_bill = float(self.calculateBill(self.predicted_usage_kwh))
-            self.set_date = DateType.today()
-
-        if self.supabase is None:
-            return None
-
-        current_month_row = self._get_current_month_row()
-
-        if current_month_row:
-            self.limit_id = int(current_month_row.get("limit_id") or 0)
-
-            if current_month_row.get("limit_amount") is not None:
-                self.limit_amount = float(current_month_row["limit_amount"])
-
-            (
-                self.supabase
-                .table("billprediction")
-                .update({
-                    "actual_bill": self.actual_bill,
-                    "predicted_bill": self.predicted_bill,
-                    "set_date": self.set_date.isoformat(),
-                    "tariff_strategy": self.strategy.__class__.__name__,
-                })
-                .eq("limit_id", self.limit_id)
-                .execute()
-            )
-        else:
-            result = (
-                self.supabase
-                .table("billprediction")
-                .insert({
-                    "user_id": self.user_id,
-                    "limit_amount": self.limit_amount if self.limit_amount else None,
-                    "actual_bill": self.actual_bill,
-                    "predicted_bill": self.predicted_bill,
-                    "set_date": self.set_date.isoformat(),
-                    "tariff_strategy": self.strategy.__class__.__name__,
-                })
-                .execute()
-            )
-
-            data = getattr(result, "data", None) or []
-            if data:
-                self.limit_id = int(data[0].get("limit_id") or 0)
-
-        return None
+    def setLimitId(self, limit_id: int) -> None:
+        self._limit_id = int(limit_id)
 
     def calculateBill(self, consumption: float) -> float:
-        consumption = float(consumption)
+        consumption = max(float(consumption), 0.0)
 
         if consumption <= 6000:
-            self.setStrategy(Tariff018Strategy())
-            return float(self.executeStrategy(consumption))
+            return round(consumption * 0.18, 2)
 
-        first_part = Tariff018Strategy().calculateBill(6000)
-        second_part = Tariff030Strategy().calculateBill(consumption - 6000)
-        self.setStrategy(Tariff030Strategy())
-        return float(round(first_part + second_part, 2))
+        first_tier_bill = 6000 * 0.18
+        remaining_usage = consumption - 6000
+        second_tier_bill = remaining_usage * 0.30
+
+        return round(first_tier_bill + second_tier_bill, 2)
+
+    def _resetForecastOnly(self) -> None:
+        self._predicted_usage_kwh = 0.0
+        self._predicted_bill = 0.0
+        self._forecast_available = False
+
+    def syncActualFromBillData(self, bill_data: dict | None) -> None:
+        """
+        Update current values only.
+        """
+        if not isinstance(bill_data, dict):
+            self._actual_usage_kwh = 0.0
+            self._actual_bill = 0.0
+            self._days_passed = 0
+            self._days_in_month = 30
+            self._billing_month = DateType.today().replace(day=1).isoformat()
+            return
+
+        daily_values = bill_data.get("daily_net_values") or []
+        daily_values = [max(float(v or 0.0), 0.0) for v in daily_values]
+
+        self._days_passed = len(daily_values)
+        self._days_in_month = int(bill_data.get("days_in_month") or 30)
+        self._billing_month = (
+            bill_data.get("billing_month")
+            or DateType.today().replace(day=1).isoformat()
+        )
+
+        self._actual_usage_kwh = round(
+            float(bill_data.get("current_usage_kwh") or 0.0),
+            2
+        )
+        self._actual_bill = self.calculateBill(self._actual_usage_kwh)
+
+    def runScheduledCheckpoint(self, checkpoint_day: int, bill_data: dict | None) -> None:
+        """
+        Official scheduler-only forecast method.
+        """
+        valid_checkpoints = [7, 14, 21, 28]
+        if checkpoint_day not in valid_checkpoints:
+            raise ValueError("checkpoint_day must be one of: 7, 14, 21, 28")
+
+        self.syncActualFromBillData(bill_data)
+
+        if not isinstance(bill_data, dict):
+            self._resetForecastOnly()
+            return
+
+        daily_values = bill_data.get("daily_net_values") or []
+        daily_values = [max(float(v or 0.0), 0.0) for v in daily_values]
+
+        if self._days_passed < 7:
+            self._resetForecastOnly()
+            return
+
+        if self._days_passed < checkpoint_day:
+            return
+
+        if self._last_checkpoint_day == checkpoint_day:
+            return
+
+        last_7 = daily_values[-7:]
+        if len(last_7) < 7:
+            self._resetForecastOnly()
+            return
+
+        sma_7 = sum(last_7) / 7
+        remaining_days = max(self._days_in_month - checkpoint_day, 0)
+
+        self._predicted_usage_kwh = round(
+            self._actual_usage_kwh + (sma_7 * remaining_days),
+            2
+        )
+        self._predicted_bill = self.calculateBill(self._predicted_usage_kwh)
+        self._forecast_available = True
+        self._last_checkpoint_day = checkpoint_day
+
+    def compareActualWithPredicted(self) -> int:
+        if self._limit_amount <= 0:
+            return 0
+
+        if not self._forecast_available:
+            return 0
+
+        return 1 if self._predicted_bill + 10 >= self._limit_amount else 0
+
+    def build_db_payload(self) -> dict:
+        return {
+            "user_id": self._user_id,
+            "limit_amount": self._limit_amount if self._limit_amount > 0 else None,
+            "actual_bill": round(self._actual_bill, 2),
+            "predicted_bill": round(self._predicted_bill, 2),
+            "billing_month": self._billing_month,
+            "current_usage_kwh": round(self._actual_usage_kwh, 2),
+            "predicted_usage_kwh": round(self._predicted_usage_kwh, 2),
+            "forecast_available": self._forecast_available,
+            "days_passed": self._days_passed,
+            "days_in_month": self._days_in_month,
+            "last_checkpoint_day": self._last_checkpoint_day,
+        }
+
+    def to_dict(self) -> dict:
+        return {
+            "user_id": self._user_id,
+            "limit_id": self._limit_id,
+            "limit_amount": self._limit_amount if self._limit_amount > 0 else None,
+            "actual_bill": round(self._actual_bill, 2),
+            "predicted_bill": round(self._predicted_bill, 2),
+            "limit_warning": bool(self.compareActualWithPredicted()),
+            "current_usage_kwh": round(self._actual_usage_kwh, 2),
+            "predicted_usage_kwh": round(self._predicted_usage_kwh, 2),
+            "forecast_available": self._forecast_available,
+            "days_passed": self._days_passed,
+            "days_in_month": self._days_in_month,
+            "last_checkpoint_day": self._last_checkpoint_day,
+            "billing_month": self._billing_month,
+        }
