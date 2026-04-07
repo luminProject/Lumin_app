@@ -18,6 +18,7 @@ class DeviceCard extends StatelessWidget {
   final VoidCallback? onSettings;
   final VoidCallback? onDelete;
   final VoidCallback? onReconnect;
+  final Function(String)? onRename;
 
   const DeviceCard({
     super.key,
@@ -31,6 +32,7 @@ class DeviceCard extends StatelessWidget {
     this.onSettings,
     this.onDelete,
     this.onReconnect,
+    this.onRename,
   });
 
   void _openMenuSheet(BuildContext context) {

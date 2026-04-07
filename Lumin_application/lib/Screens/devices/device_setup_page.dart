@@ -6,8 +6,23 @@ import 'package:lumin_application/theme/app_colors.dart';
 
 class DeviceSetupPage extends StatefulWidget {
   final String deviceId;
+  final bool isEditMode;
+  final int? deviceDbId;
+  final String? initialName;
+  final String? initialRoom;
+  final String? initialDeviceType;
+  final String? initialPanelCapacity;
 
-  const DeviceSetupPage({super.key, required this.deviceId});
+  const DeviceSetupPage({
+    super.key,
+    required this.deviceId,
+    this.isEditMode = false,
+    this.deviceDbId,
+    this.initialName,
+    this.initialRoom,
+    this.initialDeviceType,
+    this.initialPanelCapacity,
+  });
 
   @override
   State<DeviceSetupPage> createState() => _DeviceSetupPageState();
@@ -21,6 +36,15 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
 
   String? _selectedRoom;
   String _deviceType = 'consumption';
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl.text = widget.initialName ?? '';
+    _capacityCtrl.text = widget.initialPanelCapacity ?? '';
+    _selectedRoom = widget.initialRoom;
+    _deviceType = widget.initialDeviceType ?? 'consumption';
+  }
 
   @override
   void dispose() {
@@ -133,13 +157,19 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
         ? widget.deviceId
         : _nameCtrl.text.trim();
 
-    Navigator.pop(context, {
+    final payload = {
+      "device_id": widget.deviceDbId,
       "device_name": deviceName,
       "device_type": _deviceType,
       "room": _deviceType == 'production' ? null : _selectedRoom,
       "panel_capacity": isSolarPanel ? _capacityCtrl.text.trim() : null,
-      "created_at": DateTime.now().toIso8601String(),
-    });
+    };
+
+    if (!widget.isEditMode) {
+      payload["created_at"] = DateTime.now().toIso8601String();
+    }
+
+    Navigator.pop(context, payload);
   }
 
   @override
@@ -158,9 +188,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           centerTitle: true,
-          title: const Text(
-            'Device Setup',
-            style: TextStyle(fontWeight: FontWeight.w900),
+          title: Text(
+            widget.isEditMode ? 'Device Settings' : 'Device Setup',
+            style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           leading: IconButton(
             onPressed: () => Navigator.pop(context),
@@ -237,7 +267,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Choose whether this device consumes energy or produces it.',
+                  widget.isEditMode
+                      ? 'Device type cannot be changed here.'
+                      : 'Choose whether this device consumes energy or produces it.',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.65),
                     fontSize: 12.5,
@@ -251,8 +283,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                   children: [
                     Expanded(
                       child: InkWell(
-                        onTap: () =>
-                            setState(() => _deviceType = 'consumption'),
+                        onTap: widget.isEditMode
+                            ? null
+                            : () => setState(() => _deviceType = 'consumption'),
                         borderRadius: BorderRadius.circular(14),
                         child: Container(
                           height: 52,
@@ -282,7 +315,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: InkWell(
-                        onTap: () => setState(() => _deviceType = 'production'),
+                        onTap: widget.isEditMode
+                            ? null
+                            : () => setState(() => _deviceType = 'production'),
                         borderRadius: BorderRadius.circular(14),
                         child: Container(
                           height: 52,
@@ -314,100 +349,107 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
 
                 const SizedBox(height: 18),
 
-                const Text(
-                  'Choose a room',
-                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Select the room where this device is located to manage it later.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.65),
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 46,
-                      height: 46,
-                      child: InkWell(
-                        onTap: _addRoomDialog,
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.06),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white12),
-                          ),
-                          child: const Icon(
-                            Icons.add_rounded,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ),
+                if (!isSolarPanel) ...[
+                  const Text(
+                    'Choose a room',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w900,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Container(
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.isEditMode
+                        ? 'Update the room where this device is located.'
+                        : 'Select the room where this device is located to manage it later.',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.65),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 46,
                         height: 46,
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: _deviceType == 'production'
-                              ? Colors.white.withOpacity(0.02)
-                              : Colors.white.withOpacity(0.04),
+                        child: InkWell(
+                          onTap: _addRoomDialog,
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.10),
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _selectedRoom,
-                            isExpanded: true,
-                            elevation: 0,
-                            dropdownColor: const Color(0xFF071821),
-                            borderRadius: BorderRadius.circular(14),
-                            icon: const Icon(
-                              Icons.keyboard_arrow_down_rounded,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
                               color: Colors.white70,
                             ),
-                            hint: Text(
-                              'Select from list',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.55),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            items: _rooms.map((r) {
-                              return DropdownMenuItem<String>(
-                                value: r,
-                                child: Text(
-                                  r,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                            onChanged: _deviceType == 'production'
-                                ? null
-                                : (v) => setState(() {
-                                    _selectedRoom = v;
-                                  }),
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Container(
+                          height: 46,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: _deviceType == 'production'
+                                ? Colors.white.withOpacity(0.02)
+                                : Colors.white.withOpacity(0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.10),
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedRoom,
+                              isExpanded: true,
+                              elevation: 0,
+                              dropdownColor: const Color(0xFF071821),
+                              borderRadius: BorderRadius.circular(14),
+                              icon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: Colors.white70,
+                              ),
+                              hint: Text(
+                                'Select from list',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.55),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              items: _rooms.map((r) {
+                                return DropdownMenuItem<String>(
+                                  value: r,
+                                  child: Text(
+                                    r,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: _deviceType == 'production'
+                                  ? null
+                                  : (v) => setState(() {
+                                      _selectedRoom = v;
+                                    }),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
 
-                const SizedBox(height: 18),
+                  const SizedBox(height: 18),
+                ],
 
                 if (isSolarPanel) ...[
                   const Text(
@@ -419,7 +461,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Enter the power capacity of the solar panel.',
+                    widget.isEditMode
+                        ? 'Update the power capacity of the solar panel.'
+                        : 'Enter the power capacity of the solar panel.',
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.65),
                       fontSize: 12.5,
@@ -446,7 +490,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  isSolarPanel
+                  widget.isEditMode
+                      ? 'Update the device name here.'
+                      : isSolarPanel
                       ? 'Please enter a name for the solar panel device.'
                       : 'Please enter a device name for consumption devices.',
                   style: TextStyle(
@@ -489,9 +535,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                     ),
-                    child: const Text(
-                      'Finish setup',
-                      style: TextStyle(
+                    child: Text(
+                      widget.isEditMode ? 'Save changes' : 'Finish setup',
+                      style: const TextStyle(
                         fontSize: 15.5,
                         fontWeight: FontWeight.w900,
                       ),

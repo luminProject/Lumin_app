@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:lumin_application/Screens/home/home_page.dart';
+import 'package:flutter/material.dart';
 import 'package:lumin_application/Screens/bill_predection/bill_prediction.dart';
 import 'package:lumin_application/Screens/profile%20settings%20page/profile_settings_page.dart';
 import 'package:lumin_application/Screens/home/home_page.dart';
@@ -30,7 +32,10 @@ class HomeBottomNav extends StatelessWidget {
         );
 
         final begin = Offset(forward ? 0.06 : -0.06, 0.0);
-        final slide = Tween<Offset>(begin: begin, end: Offset.zero).animate(curved);
+        final slide = Tween<Offset>(
+          begin: begin,
+          end: Offset.zero,
+        ).animate(curved);
         final fade = Tween<double>(begin: 0.0, end: 1.0).animate(curved);
 
         return SlideTransition(
@@ -46,7 +51,6 @@ class HomeBottomNav extends StatelessWidget {
     required bool active,
     required VoidCallback onTap,
   }) {
-    // ✅ بدون width ثابت — نخليه يتمدد عبر Expanded
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -84,7 +88,6 @@ class HomeBottomNav extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        // ✅ خففنا شوي عشان ما يضيق على الشاشات الصغيرة
         margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
@@ -108,7 +111,8 @@ class HomeBottomNav extends StatelessWidget {
                 icon: Icons.receipt_long_rounded,
                 active: currentIndex == 1,
                 onTap: () {
-                  if (currentIndex != 1) _goTo(context, const BillPredictionPage(), 1);
+                  if (currentIndex != 1)
+                    _goTo(context, const BillPredictionPage(), 1);
                 },
               ),
             ),
@@ -117,7 +121,8 @@ class HomeBottomNav extends StatelessWidget {
                 icon: Icons.wb_sunny_rounded,
                 active: currentIndex == 2,
                 onTap: () {
-                  if (currentIndex != 2) _goTo(context, const SolarForecastPage(), 2);
+                  if (currentIndex != 2)
+                    _goTo(context, const SolarForecastPage(), 2);
                 },
               ),
             ),
@@ -126,7 +131,8 @@ class HomeBottomNav extends StatelessWidget {
                 icon: Icons.devices_rounded,
                 active: currentIndex == 3,
                 onTap: () {
-                  if (currentIndex != 3) _goTo(context, const DeviceManagementPage(), 3);
+                  if (currentIndex != 3)
+                    _goTo(context, const DeviceManagementPage(), 3);
                 },
               ),
             ),
@@ -135,7 +141,8 @@ class HomeBottomNav extends StatelessWidget {
                 icon: Icons.settings_rounded,
                 active: currentIndex == 4,
                 onTap: () {
-                  if (currentIndex != 4) _goTo(context, const ProfileSettingsPage(), 4);
+                  if (currentIndex != 4)
+                    _goTo(context, const ProfileSettingsPage(), 4);
                 },
               ),
             ),

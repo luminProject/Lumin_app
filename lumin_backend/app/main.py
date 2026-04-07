@@ -143,12 +143,21 @@ class SensorReadingIn(BaseModel):
     recorded_at: datetime | None = None
 
 
+
 class DeviceCreate(BaseModel):
     """
     Model used when creating a new device.
     """
     name: str
     device_type: str
+
+
+# Model for updating device settings
+class DeviceUpdate(BaseModel):
+    name: str
+    device_type: str
+    room: str | None = None
+    panel_capacity: str | None = None
 
 
 # -----------------------------
@@ -160,6 +169,7 @@ def root():
     Simple health check endpoint.
     """
     return {"message": "Lumin backend is running"}
+
 
 
 # -----------------------------
@@ -185,6 +195,37 @@ def ingest_sensor_reading(payload: SensorReadingIn):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# -----------------------------
+# Sensor Readings Retrieval
+# -----------------------------
+@app.get("/sensor-readings/{device_id}")
+def get_device_readings(device_id: int):
+    """
+    Get all readings for a specific device.
+    """
+    try:
+        return {
+            "status": "success",
+            "data": facade.get_device_readings(device_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sensor-readings/latest/{device_id}")
+def get_latest_reading(device_id: int):
+    """
+    Get the latest reading for a device.
+    """
+    try:
+        return {
+            "status": "success",
+            "data": facade.get_latest_reading(device_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # -----------------------------
@@ -230,6 +271,7 @@ def add_device(user_id: str, device: DeviceCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+
 @app.delete("/devices/{device_id}")
 def delete_device(device_id: int):
     """
@@ -242,6 +284,28 @@ def delete_device(device_id: int):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# PATCH endpoint for updating device settings (name, type, room, panel_capacity)
+@app.patch("/devices/{device_id}")
+def update_device(device_id: int, payload: DeviceUpdate):
+    """
+    Update editable device settings only (name, room, panel_capacity).
+    Does NOT modify created_at.
+    """
+    try:
+        return {
+            "status": "success",
+            "data": facade.update_device_settings(
+                device_id=device_id,
+                name=payload.name,
+                device_type=payload.device_type,
+                room=payload.room,
+                panel_capacity=payload.panel_capacity,
+            ),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # -----------------------------
 # Billing Endpoint

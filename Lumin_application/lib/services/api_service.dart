@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/foundation.dart';
 
 /// ApiService handles all HTTP requests to the FastAPI backend.
 ///
@@ -16,9 +16,12 @@ import 'package:flutter/foundation.dart';
 /// - We send Supabase session access token in:
 ///     Authorization: Bearer <token>
 class ApiService {
-
   /// Base URL for backend depending on current platform.
-  static String get baseUrl => kIsWeb ? 'http://127.0.0.1:8001' : 'http://10.0.2.2:8000';
+  static String get baseUrl {
+    if (kIsWeb) return 'http://127.0.0.1:8000';
+    if (Platform.isAndroid) return 'http://10.0.2.2:8000';
+    return 'http://127.0.0.1:8000';
+  }
 
   // ===== Helpers =====
 
@@ -92,6 +95,62 @@ class ApiService {
     }
   }
 
+  /// PATCH /devices/{deviceId}
+  /// Updates editable device settings only.
+  /// Never sends created_at.
+  Future<void> updateDeviceSettings({
+    required int deviceId,
+    required String deviceName,
+    required String deviceType,
+    String? room,
+    String? panelCapacity,
+  }) async {
+    final body = {
+      'name': deviceName,
+      'device_type': deviceType,
+      'room': deviceType == 'production' ? null : room,
+      'panel_capacity': deviceType == 'production' ? panelCapacity : null,
+    };
+
+    final response = await http.patch(
+      Uri.parse('$baseUrl/devices/$deviceId'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(body),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update device settings');
+    }
+  }
+
+  /// GET /sensor-readings/{deviceId}
+  Future<List<dynamic>> getDeviceReadings(int deviceId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/sensor-readings/$deviceId'),
+    );
+
+    if (response.statusCode == 200) {
+      final jsonResponse = json.decode(response.body);
+      return jsonResponse['data'] ?? [];
+    } else {
+      throw Exception('Failed to load device readings');
+    }
+  }
+
+  /// GET /sensor-readings/latest/{deviceId}
+  Future<Map<String, dynamic>?> getLatestReading(int deviceId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/sensor-readings/latest/$deviceId'),
+    );
+
+    if (response.statusCode == 200) {
+      final jsonResponse = json.decode(response.body);
+      return jsonResponse['data'] as Map<String, dynamic>?;
+    } else {
+      throw Exception('Failed to load latest reading');
+    }
+  }
+
   // ===== Bill =====
 
   /// GET /bill/{userId}
@@ -99,10 +158,7 @@ class ApiService {
   Future<Map<String, dynamic>> getBill() async {
     final url = '$baseUrl/bill/$_userId';
 
-    final response = await http.get(
-      Uri.parse(url),
-      headers: authHeaders(),
-    );
+    final response = await http.get(Uri.parse(url), headers: authHeaders());
 
     debugPrint('GET BILL -> $url');
     debugPrint('GET BILL <- status=${response.statusCode}');
@@ -123,9 +179,7 @@ class ApiService {
     final response = await http.post(
       Uri.parse(url),
       headers: authHeaders(json: true),
-      body: json.encode({
-        'limit_amount': billLimit,
-      }),
+      body: json.encode({'limit_amount': billLimit}),
     );
 
     debugPrint('POST BILL LIMIT -> $url');
@@ -156,7 +210,9 @@ class ApiService {
 
   /// GET /solar-forecast/{userId}
   Future<Map<String, dynamic>> getSolarForecast() async {
-    final response = await http.get(Uri.parse('$baseUrl/solar-forecast/$_userId'));
+    final response = await http.get(
+      Uri.parse('$baseUrl/solar-forecast/$_userId'),
+    );
     if (response.statusCode == 200) {
       return json.decode(response.body)['data'];
     } else {
@@ -269,7 +325,10 @@ class ApiService {
   }
 
   /// PATCH /profiles/{userId}
-  Future<void> updateProfile(String userId, Map<String, dynamic> payload) async {
+  Future<void> updateProfile(
+    String userId,
+    Map<String, dynamic> payload,
+  ) async {
     final res = await http.patch(
       Uri.parse('$baseUrl/profiles/$userId'),
       headers: authHeaders(json: true),

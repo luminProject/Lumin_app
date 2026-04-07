@@ -61,6 +61,38 @@ class LuminFacade:
         result = self.supabase.table("sensor_data").insert(row).execute()
         return {"status": "stored", "data": getattr(result, "data", None)}
 
+    def get_device_readings(self, device_id: int) -> List[Dict[str, Any]]:
+        """
+        Get all sensor readings for a specific device ordered by time (latest first).
+        """
+        res = (
+            self.supabase
+            .table("sensor_data")
+            .select("device_id, kwh_value, reading_time")
+            .eq("device_id", int(device_id))
+            .order("reading_time", desc=True)
+            .execute()
+        )
+
+        return res.data or []
+
+    def get_latest_reading(self, device_id: int) -> Dict[str, Any]:
+        """
+        Get the latest sensor reading for a specific device.
+        """
+        res = (
+            self.supabase
+            .table("sensor_data")
+            .select("device_id, kwh_value, reading_time")
+            .eq("device_id", int(device_id))
+            .order("reading_time", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        data = res.data or []
+        return data[0] if data else {}
+
     # -----------------------------
     # ENERGY (optional helper for a simple /energy endpoint)
     # -----------------------------
@@ -152,6 +184,37 @@ class LuminFacade:
             .execute()
         )
         return {"status": "device_deleted", "data": res.data}
+
+    def update_device_settings(
+        self,
+        *,
+        device_id: int,
+        name: str,
+        device_type: str,
+        room: str | None = None,
+        panel_capacity: str | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Update editable device settings only.
+        Does NOT modify created_at.
+        - consumption: update device_name and room, panel_capacity -> None
+        - production: update device_name and panel_capacity, room -> None
+        """
+        update_payload = {
+            "device_name": name,
+            "device_type": device_type,
+            "room": None if device_type == "production" else room,
+            "panel_capacity": panel_capacity if device_type == "production" else None,
+        }
+
+        res = (
+            self.supabase
+            .table("device")
+            .update(update_payload)
+            .eq("device_id", int(device_id))
+            .execute()
+        )
+        return {"status": "device_updated", "data": res.data}
 
     # -----------------------------
     # ENERGY MONITORING (EnergyCalculation Class)

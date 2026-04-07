@@ -55,3 +55,4 @@ lumin_backend/.venv/
 **/build/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
+lumin_backend/venv/
