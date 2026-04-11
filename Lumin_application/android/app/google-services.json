@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "179516399851",
+    "project_id": "lumin-app-32044",
+    "storage_bucket": "lumin-app-32044.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:179516399851:android:a850e574f5b2b7421e5eae",
+        "android_client_info": {
+          "package_name": "com.example.lumin_application"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDjxE0tmvxyVifeoh9sKs7tU3LqpB0HLiA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

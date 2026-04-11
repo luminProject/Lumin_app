@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.services.smart_energy_facade import SmartEnergyFacade
+from app.core.lumin_facade import LuminFacade
 from app.supabase_client import get_supabase_for_jwt
 
 
@@ -17,16 +17,16 @@ security = HTTPBearer()
 
 def get_facade(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> SmartEnergyFacade:
+) -> LuminFacade:
     jwt = credentials.credentials
     supabase = get_supabase_for_jwt(jwt)
-    return SmartEnergyFacade(supabase)
+    return LuminFacade(supabase)
 
 
 @router.post("/generate/{user_id}")
 def generate_recommendation(
     user_id: str,
-    facade: SmartEnergyFacade = Depends(get_facade),
+    facade: LuminFacade = Depends(get_facade),
 ):
     try:
         return facade.viewRecommendations(user_id)
@@ -40,7 +40,7 @@ def generate_recommendation(
 @router.get("/latest/{user_id}")
 def get_latest_recommendation(
     user_id: str,
-    facade: SmartEnergyFacade = Depends(get_facade),
+    facade: LuminFacade = Depends(get_facade),
 ):
     try:
         return facade.getLatestRecommendation(user_id)
@@ -54,7 +54,7 @@ def get_latest_recommendation(
 @router.get("/all/{user_id}")
 def get_all_recommendations(
     user_id: str,
-    facade: SmartEnergyFacade = Depends(get_facade),
+    facade: LuminFacade = Depends(get_facade),
 ):
     try:
         return facade.getAllRecommendations(user_id)
@@ -68,7 +68,7 @@ def get_all_recommendations(
 @router.get("/notifications/{user_id}")
 def get_user_notifications(
     user_id: str,
-    facade: SmartEnergyFacade = Depends(get_facade),
+    facade: LuminFacade = Depends(get_facade),
 ):
     try:
         return facade.getNotifications(user_id)
@@ -82,7 +82,7 @@ def get_user_notifications(
 @router.get("/notifications/latest/{user_id}")
 def get_latest_notification(
     user_id: str,
-    facade: SmartEnergyFacade = Depends(get_facade),
+    facade: LuminFacade = Depends(get_facade),
 ):
     try:
         return facade.getLatestNotification(user_id)
@@ -96,7 +96,7 @@ def get_latest_notification(
 @router.get("/devices/{user_id}")
 def get_user_devices(
     user_id: str,
-    facade: SmartEnergyFacade = Depends(get_facade),
+    facade: LuminFacade = Depends(get_facade),
 ):
     try:
         return facade.getUserDeviceInfos(user_id)

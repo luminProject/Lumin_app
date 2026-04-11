@@ -35,6 +35,17 @@ class RecommendationService:
     # =========================================================
 
     def generate_for_user(self, user_id: str) -> Dict[str, Any]:
+        # 0) Check daily limit — max 2 recommendations per day
+        if self._daily_limit_reached(user_id):
+            return {
+                "success": False,
+                "status": "skipped",
+                "code": "DAILY_LIMIT_REACHED",
+                "message": "Daily recommendation limit (2) already reached for this user.",
+                "user_id": user_id,
+                "recommendation": None,
+            }
+
         # 1) Get user profile to check energy_source / has_solar_panels
         user_profile = self._get_user_profile(user_id)
         has_solar = self._user_has_solar(user_profile)
@@ -251,6 +262,28 @@ class RecommendationService:
             return chosen.get("recommendation_text")
         except Exception:
             return None
+
+    # =========================================================
+    # Daily Limit Check
+    # =========================================================
+
+    def _daily_limit_reached(self, user_id: str, max_per_day: int = 2) -> bool:
+        """Returns True if the user already received max_per_day recommendations today."""
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        try:
+            response = (
+                self.supabase.table("recommendation")
+                .select("recommendation_id")
+                .eq("user_id", user_id)
+                .gte("timestamp", today_start.isoformat())
+                .execute()
+            )
+            count = len(response.data or [])
+            return count >= max_per_day
+        except Exception:
+            return False  # If check fails, allow generation
 
     # =========================================================
     # User Profile Helpers

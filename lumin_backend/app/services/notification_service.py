@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from app.models.notification import Notification
+from app.services.fcm_service import FCMService
 
 
 class NotificationService:
@@ -54,11 +55,35 @@ class NotificationService:
         user_id: str,
         recommendation_text: str,
     ) -> Dict[str, Any]:
-        return self.create_notification(
+        result = self.create_notification(
             user_id=user_id,
             content=recommendation_text,
             notification_type="recommendation",
         )
+
+        # Send FCM push notification
+        if result.get("success"):
+            try:
+                user_row = (
+                    self.supabase.table("users")
+                    .select("fcm_token")
+                    .eq("user_id", user_id)
+                    .limit(1)
+                    .execute()
+                )
+                data = user_row.data or []
+                fcm_token = data[0].get("fcm_token") if data else None
+
+                if fcm_token:
+                    FCMService.send_push(
+                        fcm_token=fcm_token,
+                        title="💡 Lumin Recommendation",
+                        body=recommendation_text[:100],
+                    )
+            except Exception as e:
+                pass  # Push failure shouldn't break notification flow
+
+        return result
 
     def get_user_notifications(self, user_id: str) -> Dict[str, Any]:
         response = (

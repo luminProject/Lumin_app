@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 supabase
-python-dotenv
 pyjwt
 cryptography
+apscheduler
+firebase-admin

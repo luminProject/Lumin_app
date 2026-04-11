@@ -16,7 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.supabase_client import supabase_admin
-from app.services.smart_energy_facade import SmartEnergyFacade
+from app.core.lumin_facade import LuminFacade
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def send_recommendations_to_all_users():
             logger.info("Scheduler: No users found.")
             return
 
-        facade = SmartEnergyFacade(supabase_admin)
+        facade = LuminFacade(supabase_admin)
         success_count = 0
         skip_count = 0
         error_count = 0
