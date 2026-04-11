@@ -442,45 +442,36 @@ class _RecommendationCard extends StatelessWidget {
     return GlassCard(
       radius: 20,
       padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.title,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w900),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 6),
-                    Text(item.subtitle,
-                        style: const TextStyle(
-                            fontSize: 12, color: AppColors.sub)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: AppColors.mint.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.flash_on_rounded,
-                    color: AppColors.mint, size: 18),
-              ),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.title,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 4),
+                Text(item.subtitle,
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.sub)),
+              ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Text(item.body,
-              style: const TextStyle(
-                  fontSize: 12, color: AppColors.sub, height: 1.25)),
+          const SizedBox(width: 10),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: AppColors.mint.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.flash_on_rounded,
+                color: AppColors.mint, size: 18),
+          ),
         ],
       ),
     );

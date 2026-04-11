@@ -453,13 +453,13 @@ class LuminFacade:
     # SMART RECOMMENDATIONS & NOTIFICATIONS (Mana's feature)
     # -----------------------------
 
-    def viewRecommendations(self, user_id: str) -> Dict[str, Any]:
+    def viewRecommendations(self, user_id: str, recommendation_type: str = "auto") -> Dict[str, Any]:
         """
         Generate + save recommendation based on user type (Solar or Grid only).
         Automatically creates a notification after generation.
         Called by the scheduler at 3 PM and 7 PM Saudi time.
         """
-        result = self.recommendation_service.generate_for_user(user_id)
+        result = self.recommendation_service.generate_for_user(user_id, recommendation_type=recommendation_type)
 
         # Create notification if recommendation was generated
         if result.get("success") and result.get("recommendation"):

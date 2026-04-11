@@ -2,8 +2,8 @@
 scheduler.py
 
 Runs automatic recommendation jobs for all users at:
-  - 3:00 PM Saudi time (12:00 UTC)
-  - 7:00 PM Saudi time (16:00 UTC)
+  - 3:00 PM Saudi time (12:00 UTC) → Solar recommendation (or general if no solar)
+  - 7:00 PM Saudi time (16:00 UTC) → General recommendation for all users
 
 Uses APScheduler with FastAPI lifespan.
 Install: pip install apscheduler
@@ -21,18 +21,12 @@ from app.core.lumin_facade import LuminFacade
 logger = logging.getLogger(__name__)
 
 
-# ─── Core Job ────────────────────────────────────────────────
+# ─── Helper ──────────────────────────────────────────────────
 
-async def send_recommendations_to_all_users():
-    """
-    Fetches all user IDs from the users table and generates
-    a recommendation + notification for each one.
-    Runs twice daily at 3 PM and 7 PM Saudi time.
-    """
-    logger.info("⚡ Scheduler: Starting recommendation job...")
+async def _send_to_all_users(recommendation_type: str):
+    logger.info(f"Scheduler: Starting '{recommendation_type}' recommendation job...")
 
     try:
-        # Get all user IDs
         response = supabase_admin.table("users").select("user_id").execute()
         users = response.data or []
 
@@ -51,60 +45,60 @@ async def send_recommendations_to_all_users():
                 continue
 
             try:
-                result = facade.viewRecommendations(user_id)
+                result = facade.viewRecommendations(user_id, recommendation_type=recommendation_type)
 
                 if result.get("code") == "DAILY_LIMIT_REACHED":
                     skip_count += 1
-                    logger.debug(f"Scheduler: Skipped {user_id} — daily limit reached.")
                 elif result.get("success"):
                     success_count += 1
-                    logger.debug(f"Scheduler: Sent recommendation to {user_id}.")
                 else:
                     skip_count += 1
-                    logger.debug(f"Scheduler: No recommendation for {user_id} — {result.get('code')}")
 
             except Exception as e:
                 error_count += 1
                 logger.error(f"Scheduler: Error for user {user_id}: {e}")
 
         logger.info(
-            f"⚡ Scheduler: Done — "
+            f"Scheduler [{recommendation_type}]: Done — "
             f"sent={success_count}, skipped={skip_count}, errors={error_count}"
         )
 
     except Exception as e:
-        logger.error(f"⚡ Scheduler: Job failed — {e}")
+        logger.error(f"Scheduler: Job failed — {e}")
+
+
+# ─── Jobs ────────────────────────────────────────────────────
+
+async def send_solar_recommendations():
+    """3:00 PM Saudi → Solar recommendation (weekly) or general fallback."""
+    await _send_to_all_users("solar")
+
+
+async def send_general_recommendations():
+    """7:00 PM Saudi → General recommendation for all users."""
+    await _send_to_all_users("general")
 
 
 # ─── Scheduler Instance ──────────────────────────────────────
 
 def create_scheduler() -> AsyncIOScheduler:
-    """
-    Creates and configures the APScheduler instance.
-
-    Schedule (Saudi time UTC+3):
-      - 3:00 PM → 12:00 UTC
-      - 7:00 PM → 16:00 UTC
-
-    To change times, update hour/minute in the CronTrigger calls below.
-    """
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    # 3:00 PM Saudi = 12:00 UTC
+    # 3:00 PM Saudi = 12:00 UTC → Solar
     scheduler.add_job(
-        send_recommendations_to_all_users,
+        send_solar_recommendations,
         trigger=CronTrigger(hour=12, minute=0),
-        id="recommendations_3pm",
-        name="Recommendations at 3:00 PM Saudi",
+        id="recommendations_solar_3pm",
+        name="Solar Recommendations at 3:00 PM Saudi",
         replace_existing=True,
     )
 
-    # 7:00 PM Saudi = 16:00 UTC
+    # 7:00 PM Saudi = 16:00 UTC → General
     scheduler.add_job(
-        send_recommendations_to_all_users,
+        send_general_recommendations,
         trigger=CronTrigger(hour=16, minute=0),
-        id="recommendations_7pm",
-        name="Recommendations at 7:00 PM Saudi",
+        id="recommendations_general_7pm",
+        name="General Recommendations at 7:00 PM Saudi",
         replace_existing=True,
     )
 

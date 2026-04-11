@@ -34,7 +34,13 @@ class RecommendationService:
     # Public Methods
     # =========================================================
 
-    def generate_for_user(self, user_id: str) -> Dict[str, Any]:
+    def generate_for_user(self, user_id: str, recommendation_type: str = "auto") -> Dict[str, Any]:
+        """
+        recommendation_type:
+          - "auto"    → decide based on user type
+          - "solar"   → force solar recommendation (used at 3 PM)
+          - "general" → force general recommendation (used at 7 PM)
+        """
         # 0) Check daily limit — max 2 recommendations per day
         if self._daily_limit_reached(user_id):
             return {
@@ -46,14 +52,25 @@ class RecommendationService:
                 "recommendation": None,
             }
 
+        # Force general
+        if recommendation_type == "general":
+            return self._generate_general_recommendation(user_id)
+
         # 1) Get user profile to check energy_source / has_solar_panels
         user_profile = self._get_user_profile(user_id)
         has_solar = self._user_has_solar(user_profile)
 
-        if has_solar:
+        if has_solar and recommendation_type == "solar":
+            # Check weekly limit for solar recommendations
+            if self._solar_recommendation_sent_this_week(user_id):
+                return self._generate_general_recommendation(user_id)
             return self._generate_solar_recommendation(user_id)
-        else:
-            return self._generate_general_recommendation(user_id)
+
+        if has_solar and recommendation_type == "auto":
+            if not self._solar_recommendation_sent_this_week(user_id):
+                return self._generate_solar_recommendation(user_id)
+
+        return self._generate_general_recommendation(user_id)
 
     def get_latest_recommendation(self, user_id: str) -> Dict[str, Any]:
         response = (
@@ -172,20 +189,13 @@ class RecommendationService:
         # 7) Build solar recommendation text
         solar_text = self._build_recommendation_text(
             best_period=best_period,
-            best_period_avg_production=best_period_avg,
             matched_device=matched_device,
         )
 
-        # 8) Pick a general recommendation and combine
-        general_text = self._get_random_general_text()
-        final_text = solar_text
-        if general_text:
-            final_text = f"{solar_text} Additionally: {general_text}"
-
-        # 9) Save
+        # 8) Save
         saved = self._save_recommendation(
             user_id=user_id,
-            recommendation_text=final_text,
+            recommendation_text=solar_text,
             device_id=matched_device["device_id"] if matched_device else None,
         )
 
@@ -264,7 +274,7 @@ class RecommendationService:
             return None
 
     # =========================================================
-    # Daily Limit Check
+    # Daily & Weekly Limit Checks
     # =========================================================
 
     def _daily_limit_reached(self, user_id: str, max_per_day: int = 2) -> bool:
@@ -280,10 +290,25 @@ class RecommendationService:
                 .gte("timestamp", today_start.isoformat())
                 .execute()
             )
-            count = len(response.data or [])
-            return count >= max_per_day
+            return len(response.data or []) >= max_per_day
         except Exception:
-            return False  # If check fails, allow generation
+            return False
+
+    def _solar_recommendation_sent_this_week(self, user_id: str) -> bool:
+        """Returns True if a solar recommendation was already sent this week."""
+        week_start = datetime.now(timezone.utc) - timedelta(days=7)
+        try:
+            response = (
+                self.supabase.table("recommendation")
+                .select("recommendation_id")
+                .eq("user_id", user_id)
+                .not_.is_("device_id", "null")
+                .gte("timestamp", week_start.isoformat())
+                .execute()
+            )
+            return len(response.data or []) > 0
+        except Exception:
+            return False
 
     # =========================================================
     # User Profile Helpers
@@ -521,20 +546,27 @@ class RecommendationService:
     def _build_recommendation_text(
         self,
         best_period: str,
-        best_period_avg_production: float,
         matched_device: Optional[dict],
     ) -> str:
+        period_labels = {
+            "morning":   "the morning (6 AM – 10 AM)",
+            "midday":    "midday (10 AM – 2 PM)",
+            "afternoon": "the afternoon (2 PM – 6 PM)",
+            "night":     "the evening",
+        }
+        period_display = period_labels.get(best_period, best_period)
+
         if not matched_device:
             return (
-                f"The best solar production period is {best_period}, "
-                f"with an average production of {best_period_avg_production:.2f} kWh. "
-                f"No suitable shiftable device with enough readings was found."
+                f"Your solar panels produce the most energy during {period_display}. "
+                f"Try running your heavy appliances during this time to make the most of your solar energy."
             )
 
+        device_name = matched_device["device_name"]
         return (
-            f"The best time to run {matched_device['device_name']} is during the {best_period}. "
-            f"Average solar production in this period is {best_period_avg_production:.2f} kWh, "
-            f"and the device average consumption is {matched_device['avg_consumption']:.2f} kWh."
+            f"Run your {device_name} during {period_display} — "
+            f"that's when your solar panels are at their peak. "
+            f"You'll save energy and reduce your electricity bill!"
         )
 
     # =========================================================
