@@ -44,26 +44,63 @@ class LuminFacade:
     ) -> Dict[str, Any]:
         """Store a sensor reading for a device (used by /sensor-readings endpoint)."""
 
-        # Verify device exists
+        # Verify device exists and fetch current energy fields
         device_res = (
             self.supabase.table("device")
-            .select("user_id")
-            .eq("device_id", device_id)
+            .select("device_id, user_id, device_type, production, consumption, total_energy")
+            .eq("device_id", int(device_id))
             .limit(1)
             .execute()
         )
 
-        if not getattr(device_res, "data", None):
+        device_rows = getattr(device_res, "data", None) or []
+        if not device_rows:
             raise ValueError("Device not found")
 
-        row = {
+        device = device_rows[0]
+        device_type = device.get("device_type")
+        if device_type not in {"production", "consumption"}:
+            raise ValueError("Invalid device_type for device")
+
+        reading_value = float(kwh_value)
+        current_total = float(device.get("total_energy") or 0)
+        new_total = current_total + reading_value
+
+        # 1) Save the historical reading
+        sensor_row = {
             "device_id": int(device_id),
             "reading_time": reading_time_iso,
-            "kwh_value": float(kwh_value),
+            "kwh_value": reading_value,
+        }
+        sensor_result = self.supabase.table("sensor_data").insert(sensor_row).execute()
+
+        # 2) Update current reading + cumulative total on device
+        update_payload = {
+            "total_energy": new_total,
         }
 
-        result = self.supabase.table("sensor_data").insert(row).execute()
-        return {"status": "stored", "data": getattr(result, "data", None)}
+        if device_type == "production":
+            update_payload["production"] = reading_value
+            update_payload["consumption"] = 0
+        else:
+            update_payload["consumption"] = reading_value
+            update_payload["production"] = 0
+
+        device_update_result = (
+            self.supabase.table("device")
+            .update(update_payload)
+            .eq("device_id", int(device_id))
+            .execute()
+        )
+
+        return {
+            "status": "stored",
+            "sensor_data": getattr(sensor_result, "data", None),
+            "device_update": getattr(device_update_result, "data", None),
+            "current_reading": reading_value,
+            "new_total_energy": new_total,
+            "device_type": device_type,
+        }
 
     def get_device_readings(self, device_id: int) -> List[Dict[str, Any]]:
         """
