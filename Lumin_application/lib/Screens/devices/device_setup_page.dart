@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lumin_application/Widgets/gradient_background.dart';
-import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/theme/app_colors.dart';
 
 class DeviceSetupPage extends StatefulWidget {
@@ -153,9 +152,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
 
   void _finishSetup() {
     final bool isSolarPanel = _deviceType == 'production';
-    final deviceName = _nameCtrl.text.trim().isEmpty
-        ? widget.deviceId
-        : _nameCtrl.text.trim();
+    final deviceName = _nameCtrl.text.trim();
 
     final payload = {
       "device_id": widget.deviceDbId,
@@ -207,59 +204,6 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 52),
-
-                GlassCard(
-                  radius: 18,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 14,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: AppColors.mint.withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: const Icon(
-                          Icons.link_rounded,
-                          color: AppColors.mint,
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Selected device',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.65),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.deviceId,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 18),
 
                 const Text(
                   'Device type',

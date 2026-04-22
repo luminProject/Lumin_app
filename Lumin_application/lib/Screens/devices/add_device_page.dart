@@ -3,7 +3,7 @@ import 'package:lumin_application/Widgets/gradient_background.dart';
 import 'package:lumin_application/Widgets/responsive_layout.dart';
 import 'package:lumin_application/Widgets/home/glass_card.dart';
 import 'package:lumin_application/theme/app_colors.dart';
-import 'package:lumin_application/Screens/devices/device_scan_page.dart';
+import 'package:lumin_application/Screens/devices/device_setup_page.dart';
 import 'package:lumin_application/services/api_service.dart';
 
 class AddDevicePage extends StatefulWidget {
@@ -39,15 +39,17 @@ class _AddDevicePageState extends State<AddDevicePage> {
     return raw.trim();
   }
 
-  Future<void> _startPairingAndSave() async {
+  Future<void> _openSetupAndSave() async {
     if (_loading) return;
     setState(() => _loading = true);
 
     try {
-      // Open pairing/search page and expect it to return device info.
+      // Open manual device setup directly without sensor pairing.
       final result = await Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const DeviceSearchPage()),
+        MaterialPageRoute(
+          builder: (_) => const DeviceSetupPage(deviceId: 'manual_setup'),
+        ),
       );
 
       if (!mounted) return;
@@ -75,7 +77,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
             .trim();
 
         if (name.isEmpty || type.isEmpty) {
-          _snack('Pairing finished, but device info is missing.');
+          _snack('Setup finished, but device info is missing.');
           setState(() => _loading = false);
           return;
         }
@@ -94,7 +96,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
       }
 
       // Unknown return type
-      _snack('Pairing finished, but could not read device info.');
+      _snack('Setup finished, but could not read device info.');
     } catch (e) {
       if (!mounted) return;
       _snack('Error: $e');
@@ -160,7 +162,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
 
               Center(
                 child: Text(
-                  'Follow the steps below to pair a new device to your account.',
+                  'Follow the steps below to add a new device to your account.',
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
@@ -175,30 +177,30 @@ class _AddDevicePageState extends State<AddDevicePage> {
               // ===== Steps =====
               const _StepCard(
                 step: 1,
-                title: 'Power on the Sensor',
+                title: 'Choose Device Type',
                 description:
-                    'Plug in the sensor and make sure the green indicator light is on.',
+                    'Select whether the device is a production device or a consumption device.',
               ),
               const SizedBox(height: 10),
               const _StepCard(
                 step: 2,
-                title: 'Enable Pairing Mode',
+                title: 'Enter Device Name',
                 description:
-                    'Press and hold the pairing button for 3 seconds until the light starts blinking.',
+                    'Write a clear name so you can easily recognize the device later.',
               ),
               const SizedBox(height: 10),
               const _StepCard(
                 step: 3,
-                title: 'Scan for Devices',
+                title: 'Complete Device Details',
                 description:
-                    'The app will automatically search for nearby devices available for pairing.',
+                    'Fill in any required details such as room or panel capacity based on the device type.',
               ),
               const SizedBox(height: 10),
               const _StepCard(
                 step: 4,
-                title: 'Name Your Device',
+                title: 'Save Device',
                 description:
-                    'Choose a clear name so you can easily recognize it later.',
+                    'Save the device so it appears in your device management list.',
               ),
 
               const SizedBox(height: 18),
@@ -208,7 +210,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _loading ? null : _startPairingAndSave,
+                  onPressed: _loading ? null : _openSetupAndSave,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.button,
                     elevation: 0,
@@ -226,7 +228,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
                           ),
                         )
                       : const Text(
-                          'Start Pairing',
+                          'Continue Setup',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w900,
