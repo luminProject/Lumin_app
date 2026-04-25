@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lumin_application/Widgets/gradient_background.dart';
 import 'package:lumin_application/Widgets/home/glass_card.dart';
-import 'package:lumin_application/theme/app_colors.dart';
 import 'package:lumin_application/services/api_service.dart';
+import 'package:lumin_application/theme/app_colors.dart';
 
 class RecommendationsPage extends StatefulWidget {
   const RecommendationsPage({super.key});
@@ -92,14 +92,7 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
       subtitle = 'Past recommendation';
     }
 
-    return RecItem(title: _extractTitle(text), subtitle: subtitle, body: text);
-  }
-
-  String _extractTitle(String text) {
-    final dot = text.indexOf('.');
-    if (dot > 0 && dot < 80) return text.substring(0, dot + 1);
-    if (text.length > 60) return '${text.substring(0, 60)}...';
-    return text;
+    return RecItem(title: text, subtitle: subtitle, body: text);
   }
 
   List<RecItem> get _filteredHistory {
@@ -369,7 +362,7 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
                     ),
                   ),
                 );
-              }).toList(),
+              }),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -442,36 +435,43 @@ class _RecommendationCard extends StatelessWidget {
     return GlassCard(
       radius: 20,
       padding: const EdgeInsets.all(14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.title,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Text(item.subtitle,
-                    style: const TextStyle(
-                        fontSize: 12, color: AppColors.sub)),
-              ],
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.title,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 6),
+                    Text(item.subtitle,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.sub)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.mint.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.flash_on_rounded,
+                    color: AppColors.mint, size: 18),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: AppColors.mint.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.flash_on_rounded,
-                color: AppColors.mint, size: 18),
-          ),
+          const SizedBox(height: 10),
+          Text(item.body,
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.sub, height: 1.25)),
         ],
       ),
     );
