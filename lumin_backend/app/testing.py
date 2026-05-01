@@ -8,7 +8,7 @@ headers = {
 }
 
 data = {
-    "email": "testing@gmail.com",
+    "email": "notification@gmail.com",
     "password": "qwerty2@"
 }
 

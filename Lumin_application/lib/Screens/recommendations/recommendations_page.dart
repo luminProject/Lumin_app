@@ -36,20 +36,57 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
   Future<void> _loadNew() async {
     setState(() { _loadingNew = true; _error = null; });
     try {
-      final res = await _api.generateRecommendation();
-      final rec = res['recommendation'] as Map<String, dynamic>?;
-      setState(() {
-        _newRecs = rec != null ? [_mapToRecItem(rec, isNew: true)] : [];
-      });
+      final res = await _api.getLatestRecommendation();
+
+      if (res != null) {
+        // Check if it was generated today
+        final timestamp = res['timestamp'] as String?;
+        final isToday = _isToday(timestamp);
+
+        setState(() {
+          _newRecs = isToday ? [_mapToRecItem(res, isNew: true)] : [];
+        });
+      } else {
+        setState(() => _newRecs = []);
+      }
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _loadingNew = false);
+      if (mounted) setState(() => _loadingNew = false);
     }
   }
 
+  bool _isToday(String? timestamp) {
+    if (timestamp == null) return false;
+    final dt = DateTime.tryParse(timestamp)?.toLocal();
+    if (dt == null) return false;
+    final now = DateTime.now();
+    return dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  }
+
+  String _friendlyError(Object e) {
+    final msg = e.toString().toLowerCase();
+    if (msg.contains('socket') ||
+        msg.contains('connection') ||
+        msg.contains('network') ||
+        msg.contains('timeout')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+    if (msg.contains('500') || msg.contains('server')) {
+      return 'Our servers are temporarily unavailable. Please try again in a moment.';
+    }
+    if (msg.contains('401') || msg.contains('403') || msg.contains('unauthorized')) {
+      return 'Session expired. Please log in again.';
+    }
+    return 'Something went wrong. Please try again.';
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_loadNew(), _loadHistory()]);
+  }
+
   Future<void> _loadHistory() async {
-    setState(() { _loadingHistory = true; _error = null; });
+    setState(() { _loadingHistory = true; });
     try {
       final data = await _api.getAllRecommendations();
       setState(() {
@@ -59,9 +96,9 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
             .toList();
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _loadingHistory = false);
+      if (mounted) setState(() => _loadingHistory = false);
     }
   }
 
@@ -146,8 +183,13 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
           ],
         ),
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+          child: RefreshIndicator(
+            color: AppColors.mint,
+            backgroundColor: const Color(0xFF1A1F2E),
+            onRefresh: _refreshAll,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -160,17 +202,32 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded,
-                            color: Colors.redAccent, size: 18),
-                        const SizedBox(width: 8),
+                        const Icon(Icons.cloud_off_rounded,
+                            color: Colors.redAccent, size: 20),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(_error!,
                               style: const TextStyle(
-                                  color: Colors.redAccent, fontSize: 12)),
+                                  color: Colors.white,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                        TextButton(
+                          onPressed: _refreshAll,
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.mint,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text('Retry',
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                         ),
                         IconButton(
                           icon: const Icon(Icons.close, size: 16, color: Colors.white54),
                           onPressed: () => setState(() => _error = null),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
                         ),
                       ],
                     ),
@@ -264,21 +321,39 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
                 else if (items.isEmpty)
                   GlassCard(
                     radius: 18,
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Icon(Icons.info_outline_rounded,
-                            color: Colors.white.withOpacity(0.65)),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _tab == 0
-                                ? 'No new recommendations right now.'
-                                : 'No recommendations match this filter.',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.70),
-                              fontWeight: FontWeight.w700,
-                            ),
+                        Icon(
+                          _tab == 0
+                              ? Icons.lightbulb_outline_rounded
+                              : Icons.history_rounded,
+                          color: AppColors.mint.withOpacity(0.65),
+                          size: 42,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _tab == 0
+                              ? 'No recommendation yet today'
+                              : 'No history yet',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _tab == 0
+                              ? 'Your next personalized tip will arrive soon. Pull down to refresh.'
+                              : 'Your past recommendations will appear here.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.65),
+                            fontSize: 12.5,
+                            height: 1.4,
                           ),
                         ),
                       ],
@@ -297,6 +372,7 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
                 const SizedBox(height: 30),
               ],
             ),
+          ),
           ),
         ),
       ),

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime as dt, timedelta, timezone
 import datetime
 from typing import List, Dict, Any
 from app.supabase_client import supabase
@@ -7,10 +7,11 @@ from app.models.user import User
 from app.models.energy_calculation import EnergyCalculation
 from app.models.notification import Notification
 from app.models.bill_prediction import BillPrediction
+from app.models.recommendation import Recommendation
 from app.core.database_manager import DatabaseManager
-from app.services.device_factory import DeviceFactory
-from app.services.notification_service import NotificationService
-from app.services.recommendation_service import RecommendationService
+from app.core.fcm_service import FCMService
+from app.core.device_factory import DeviceFactory
+
 class LuminFacade:
     """
     Single Facade that aggregates all subsystems as required in the LUMIN report
@@ -29,8 +30,6 @@ class LuminFacade:
         self.supabase = supabase_client
         self.db = DatabaseManager(supabase_client)
         self.device_factory = DeviceFactory()
-        self.recommendation_service = RecommendationService(supabase_client)
-        self.notification_service = NotificationService(supabase_client)
 
     # -----------------------------
     # SENSOR READING (Week 3: Sensor Reading endpoint support)
@@ -488,38 +487,220 @@ class LuminFacade:
 
     # -----------------------------
     # SMART RECOMMENDATIONS & NOTIFICATIONS (Mana's feature)
+    # Pattern: Facade → Model → DatabaseManager
     # -----------------------------
 
     def viewRecommendations(self, user_id: str, recommendation_type: str = "auto") -> Dict[str, Any]:
         """
-        Generate + save recommendation based on user type (Solar or Grid only).
-        Automatically creates a notification after generation.
-        Called by the scheduler at 3 PM and 7 PM Saudi time.
+        Generate + save recommendation. Automatically creates a notification + push.
+
+        Scheduler delivery (Saudi time):
+          - Solar users:
+              * Saturday 3 PM → custom solar recommendation
+              * Tuesday  7 PM → general tip
+          - Grid-only users:
+              * Monday   4 PM → general tip
+              * Thursday 8 PM → general tip
+
+        recommendation_type:
+          - "solar"   → force solar recommendation
+          - "general" → force general recommendation
+          - "auto"    → decide based on user type (used for manual API calls)
         """
-        result = self.recommendation_service.generate_for_user(user_id, recommendation_type=recommendation_type)
+        # Force general
+        if recommendation_type == "general":
+            return self._generate_general_recommendation(user_id)
 
-        # Create notification if recommendation was generated
-        if result.get("success") and result.get("recommendation"):
-            recommendation_text = result["recommendation"].get("recommendation_text")
-            if recommendation_text:
-                self.notification_service.create_recommendation_notification(
-                    user_id=user_id,
-                    recommendation_text=recommendation_text,
+        # Force solar (or auto with solar user)
+        if recommendation_type == "solar":
+            user_profile = self.db.get_user_profile(user_id)
+            if Recommendation.userHasSolar(user_profile):
+                return self._generate_solar_recommendation(user_id)
+            # Solar user without solar config → fall back to general
+            return self._generate_general_recommendation(user_id)
+
+        # Auto (manual API): decide based on profile
+        user_profile = self.db.get_user_profile(user_id)
+        if Recommendation.userHasSolar(user_profile):
+            return self._generate_solar_recommendation(user_id)
+        return self._generate_general_recommendation(user_id)
+
+    def _generate_solar_recommendation(self, user_id: str) -> Dict[str, Any]:
+        """Generate a solar-based recommendation. Falls back to general if data is missing."""
+        end_date = dt.now(timezone.utc)
+        start_date = end_date - timedelta(days=7)
+
+        # Get production devices
+        production_devices = self.db.get_devices_by_type(user_id, "production")
+        if not production_devices:
+            return self._generate_general_recommendation(user_id, fallback_reason="NO_PRODUCTION_DEVICES")
+
+        production_device_ids = [d["device_id"] for d in production_devices]
+
+        # Get solar readings for last 7 days
+        solar_rows = self.db.get_sensor_rows_for_devices(
+            device_ids=production_device_ids,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if not solar_rows:
+            return self._generate_general_recommendation(user_id, fallback_reason="NO_SOLAR_READINGS")
+
+        # Get shiftable consumption devices and their readings
+        shiftable_devices = self.db.get_shiftable_consumption_devices(user_id)
+
+        device_readings_by_id: Dict[int, List[Dict[str, Any]]] = {}
+        if shiftable_devices:
+            shiftable_ids = [d["device_id"] for d in shiftable_devices]
+            all_device_rows = self.db.get_sensor_rows_for_devices(
+                device_ids=shiftable_ids,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            for row in all_device_rows:
+                did = row.get("device_id")
+                if did is not None:
+                    device_readings_by_id.setdefault(did, []).append(row)
+
+        # Build recommendation using the Model
+        recommendation = Recommendation(user_id=user_id)
+        success = recommendation.buildSolarFromReadings(
+            solar_rows=solar_rows,
+            shiftable_devices=shiftable_devices,
+            device_readings_by_id=device_readings_by_id,
+        )
+
+        if not success:
+            return self._generate_general_recommendation(user_id, fallback_reason="BEST_PERIOD_NOT_FOUND")
+
+        # Save via DatabaseManager
+        saved = self.db.insert_recommendation(recommendation.build_db_payload())
+
+        # Send notification + push
+        self._send_notification_and_push(user_id, recommendation.recommendation_text)
+
+        response = recommendation.to_response_dict()
+        response.update({
+            "success": True,
+            "status": "success",
+            "code": "RECOMMENDATION_GENERATED",
+            "message": "Recommendation generated successfully.",
+            "user_id": user_id,
+            "user_type": "solar",
+            "window_days": 7,
+            "recommendation": saved,
+        })
+        return response
+
+    def _generate_general_recommendation(self, user_id: str, fallback_reason: str = None) -> Dict[str, Any]:
+        """Pick a random general tip from the database and save it."""
+        general_text = self.db.get_random_general_recommendation_text()
+        if not general_text:
+            return {
+                "success": False,
+                "status": "empty",
+                "code": "NO_GENERAL_RECOMMENDATIONS",
+                "message": "No general recommendations found in the database.",
+                "user_id": user_id,
+                "user_type": "grid_only",
+                "recommendation": None,
+            }
+
+        # Build via Model
+        recommendation = Recommendation(user_id=user_id)
+        recommendation.buildFromGeneralText(general_text)
+
+        # Save via DatabaseManager
+        saved = self.db.insert_recommendation(recommendation.build_db_payload())
+
+        # Send notification + push
+        self._send_notification_and_push(user_id, general_text)
+
+        return {
+            "success": True,
+            "status": "success",
+            "code": "GENERAL_RECOMMENDATION_GENERATED",
+            "message": "General recommendation generated successfully.",
+            "user_id": user_id,
+            "user_type": "grid_only",
+            "fallback_reason": fallback_reason,
+            "recommendation": saved,
+        }
+
+    def _send_notification_and_push(self, user_id: str, recommendation_text: str) -> None:
+        """Save a notification to DB and trigger an FCM push if a token exists."""
+        notification = Notification.forRecommendation(user_id, recommendation_text)
+
+        # Save via DatabaseManager
+        self.db.insert_notification(notification.build_db_payload())
+
+        # Send FCM push (silent on failure)
+        try:
+            fcm_token = self.db.get_user_fcm_token(user_id)
+            if fcm_token:
+                FCMService.send_push(
+                    fcm_token=fcm_token,
+                    title=notification.getPushTitle(),
+                    body=notification.getPushBody(),
                 )
-
-        return result
+        except Exception:
+            pass
 
     def getLatestRecommendation(self, user_id: str) -> Dict[str, Any]:
-        return self.recommendation_service.get_latest_recommendation(user_id)
+        data = self.db.get_latest_recommendation(user_id)
+        if not data:
+            return {
+                "success": False,
+                "status": "empty",
+                "code": "NO_RECOMMENDATIONS",
+                "message": "No recommendations found for this user.",
+                "data": None,
+            }
+        return {
+            "success": True,
+            "status": "success",
+            "code": "LATEST_RECOMMENDATION_FETCHED",
+            "message": "Latest recommendation fetched successfully.",
+            "data": data,
+        }
 
     def getAllRecommendations(self, user_id: str) -> Dict[str, Any]:
-        return self.recommendation_service.get_all_recommendations(user_id)
+        data = self.db.get_all_recommendations(user_id)
+        return {
+            "success": True,
+            "status": "success",
+            "code": "RECOMMENDATIONS_FETCHED",
+            "message": "Recommendations fetched successfully.",
+            "data": data,
+        }
 
     def getNotifications(self, user_id: str) -> Dict[str, Any]:
-        return self.notification_service.get_user_notifications(user_id)
+        data = self.db.get_user_notifications(user_id)
+        return {
+            "success": True,
+            "status": "success",
+            "code": "NOTIFICATIONS_FETCHED",
+            "message": "Notifications fetched successfully." if data else "No notifications found for this user.",
+            "data": data,
+        }
 
     def getLatestNotification(self, user_id: str) -> Dict[str, Any]:
-        return self.notification_service.get_latest_notification(user_id)
+        data = self.db.get_latest_notification(user_id)
+        if not data:
+            return {
+                "success": False,
+                "status": "empty",
+                "code": "NO_NOTIFICATIONS",
+                "message": "No notifications found for this user.",
+                "data": None,
+            }
+        return {
+            "success": True,
+            "status": "success",
+            "code": "LATEST_NOTIFICATION_FETCHED",
+            "message": "Latest notification fetched successfully.",
+            "data": data,
+        }
 
     # -----------------------------
     # SMART DEVICES (DeviceFactory)

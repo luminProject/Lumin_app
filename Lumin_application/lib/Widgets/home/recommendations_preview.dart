@@ -29,7 +29,7 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    if (mounted) setState(() { _loading = true; _error = null; });
     try {
       final res = await _api.getLatestRecommendation();
 
@@ -39,20 +39,34 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
         final isToday = _isToday(timestamp);
 
         if (isToday) {
-          setState(() => _item = _map(res));
+          if (mounted) setState(() => _item = _map(res));
         } else {
           // Latest recommendation exists but it's from a previous day
-          setState(() => _item = null);
+          if (mounted) setState(() => _item = null);
         }
       } else {
         // No recommendations at all
-        setState(() => _item = null);
+        if (mounted) setState(() => _item = null);
       }
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _friendlyError(Object e) {
+    final msg = e.toString().toLowerCase();
+    if (msg.contains('socket') ||
+        msg.contains('connection') ||
+        msg.contains('network') ||
+        msg.contains('timeout')) {
+      return 'No internet connection.';
+    }
+    if (msg.contains('500') || msg.contains('server')) {
+      return 'Server unavailable. Try again soon.';
+    }
+    return 'Could not load recommendation.';
   }
 
   bool _isToday(String? timestamp) {
@@ -124,22 +138,29 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                const Icon(Icons.error_outline_rounded,
-                    color: Colors.redAccent, size: 18),
-                const SizedBox(width: 8),
+                const Icon(Icons.cloud_off_rounded,
+                    color: Colors.redAccent, size: 20),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Could not load recommendation.',
+                    _error!,
                     style: TextStyle(
-                        color: Colors.white.withOpacity(0.70), fontSize: 12),
+                        color: Colors.white.withOpacity(0.85),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.refresh_rounded,
-                      color: AppColors.mint, size: 18),
+                TextButton(
                   onPressed: _load,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.mint,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Retry',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 12)),
                 ),
               ],
             ),
@@ -150,14 +171,29 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                Icon(Icons.info_outline_rounded,
-                    color: Colors.white.withOpacity(0.55), size: 18),
-                const SizedBox(width: 8),
+                Icon(Icons.lightbulb_outline_rounded,
+                    color: AppColors.mint.withOpacity(0.65), size: 22),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'No recommendations for today.',
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(0.65), fontSize: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'No recommendation yet today',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.85),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Check back later for your next tip.',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.55),
+                            fontSize: 11.5),
+                      ),
+                    ],
                   ),
                 ),
               ],
