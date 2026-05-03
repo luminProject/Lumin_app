@@ -62,7 +62,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     IconData icon;
     Color accent;
     switch (type) {
-      case 'recommendation':
+      case 'recommendation'||'bill_update':
         icon = Icons.flash_on_rounded;
         accent = AppColors.mint;
         break;
@@ -97,7 +97,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   List<_NotifItem> get _items {
-    if (_tab == 1) return _allNotifications.where((n) => n.type == 'bill_warning').toList();
+    if (_tab == 1) return _allNotifications.where((n) => n.type == 'bill_warning'|| n.type == 'bill_update').toList();
     if (_tab == 2) return _allNotifications.where((n) => n.type == 'solar').toList();
     return _allNotifications.where((n) => n.type == 'recommendation').toList();
   }

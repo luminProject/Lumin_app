@@ -17,87 +17,246 @@ class DatabaseManager:
     def __init__(self, supabase_client: Any):
         self.supabase = supabase_client
 
-    # =========================================================
-    # ENERGY (existing — DO NOT MODIFY)
-    # =========================================================
+    # =============================
+    # USER PROFILE
+    # =============================
 
-    def get_current_month_energy_rows(self, user_id: str) -> List[Dict[str, Any]]:
-        today = DateType.today()
-        billing_month_start = today.replace(day=1).isoformat()
+    def get_user_profile_row(self, user_id: str) -> Dict[str, Any] | None:
+        """
+        Read user profile row from users table.
 
-        if today.month == 12:
-            next_month_start = DateType(today.year + 1, 1, 1).isoformat()
-        else:
-            next_month_start = DateType(today.year, today.month + 1, 1).isoformat()
+        DatabaseManager returns raw dict only.
+        It does not know the User model.
+        """
+
+        result = (
+            self.supabase
+            .table("users")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .limit(1)
+            .execute()
+        )
+
+        rows = getattr(result, "data", None) or []
+        return rows[0] if rows else None
+
+    def insert_user_profile_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insert user profile row.
+        """
+
+        result = (
+            self.supabase
+            .table("users")
+            .insert(row)
+            .execute()
+        )
+
+        rows = getattr(result, "data", None) or []
+
+        if not rows:
+            raise ValueError("Failed to create profile")
+
+        return rows[0]
+
+    def update_user_profile_row(
+        self,
+        user_id: str,
+        info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Update user profile row.
+        """
+
+        (
+            self.supabase
+            .table("users")
+            .update(info)
+            .eq("user_id", str(user_id))
+            .execute()
+        )
+
+        row = self.get_user_profile_row(user_id)
+
+        if not row:
+            raise ValueError("Profile not found")
+
+        return row
+    # =============================
+    # USER BILLING DATE
+    # =============================
+
+    def get_user_last_billing_end_date(self, user_id: str) -> DateType | None:
+        """
+        Get last billing end date from users table.
+
+        Used to:
+        - Calculate current billing cycle
+        - Define cycle_start = last_billing_end_date + 1
+        """
+
+        rows = (
+            self.supabase
+            .table("users")
+            .select("last_billing_end_date")
+            .eq("user_id", str(user_id))
+            .limit(1)
+            .execute()
+        ).data or []
+
+        if not rows:
+            return None
+
+        raw = rows[0].get("last_billing_end_date")
+        if not raw:
+            return None
+
+        return DateType.fromisoformat(str(raw)[:10])
+
+
+    def update_user_last_billing_end_date(
+        self,
+        user_id: str,
+        last_billing_end_date: DateType,
+    ) -> None:
+        """
+        Update billing end date.
+
+        IMPORTANT:
+        - This does NOT touch billprediction table.
+        - System will react later when GET /bill is called.
+        """
+
+        (
+            self.supabase
+            .table("users")
+            .update({"last_billing_end_date": last_billing_end_date.isoformat()})
+            .eq("user_id", str(user_id))
+            .execute()
+        )
+
+
+    # =============================
+    # ENERGY DATA
+    # =============================
+
+    def get_current_cycle_energy_rows(
+        self,
+        user_id: str,
+        cycle_start: DateType,
+        cycle_end: DateType,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch energy rows within current billing cycle.
+
+        Used for:
+        - actual usage calculation
+        - SMA-7 forecast
+        """
 
         result = (
             self.supabase
             .table("energycalculation")
-            .select("calculation_id, user_id, date, total_consumption, solar_production, total_cost")
+            .select("*")
             .eq("user_id", str(user_id))
-            .gte("date", billing_month_start)
-            .lt("date", next_month_start)
+            .gte("date", cycle_start.isoformat())
+            .lte("date", cycle_end.isoformat())
             .order("date", desc=False)
             .execute()
         )
 
         return getattr(result, "data", None) or []
 
-    def get_users_with_current_month_energy(self) -> List[str]:
-        today = DateType.today()
-        billing_month_start = today.replace(day=1).isoformat()
 
-        if today.month == 12:
-            next_month_start = DateType(today.year + 1, 1, 1).isoformat()
-        else:
-            next_month_start = DateType(today.year, today.month + 1, 1).isoformat()
+    def get_users_with_energy(self) -> List[str]:
+        """
+        Get all users who have energy data.
+
+        Used by:
+        - scheduler jobs
+        """
 
         result = (
             self.supabase
             .table("energycalculation")
             .select("user_id")
-            .gte("date", billing_month_start)
-            .lt("date", next_month_start)
             .execute()
         )
 
         rows = getattr(result, "data", None) or []
-        user_ids: list[str] = []
+        return sorted(set(str(r["user_id"]) for r in rows if r.get("user_id")))
 
-        for row in rows:
-            user_id = row.get("user_id")
-            if user_id is not None:
-                user_ids.append(str(user_id))
 
-        return sorted(set(user_ids))
+    # =============================
+    # BILL PREDICTION TABLE
+    # =============================
 
-    # =========================================================
-    # BILL (existing — DO NOT MODIFY)
-    # =========================================================
+    def get_latest_bill_row(self, user_id: str) -> Dict[str, Any] | None:
+        """
+        Get latest bill row (by limit_id).
 
-    def get_current_month_bill_row(self, user_id: str) -> Dict[str, Any] | None:
-        today = DateType.today()
-        billing_month = today.replace(day=1).isoformat()
+        Used ONLY for:
+        - carrying forward limit_amount
+        """
 
         rows = (
             self.supabase
             .table("billprediction")
-            .select(
-                "limit_id, user_id, limit_amount, actual_bill, predicted_bill, "
-                "billing_month, current_usage_kwh, predicted_usage_kwh, "
-                "forecast_available, days_passed, days_in_month, last_checkpoint_day"
-            )
+            .select("*")
             .eq("user_id", str(user_id))
-            .eq("billing_month", billing_month)
+            .order("limit_id", desc=True)
             .limit(1)
             .execute()
         ).data or []
 
         return rows[0] if rows else None
 
-    def save_current_month_bill(self, user_id: str, payload: Dict[str, Any]) -> int:
-        current_row = self.get_current_month_bill_row(user_id)
 
+    def get_bill_row_by_cycle(
+        self,
+        user_id: str,
+        cycle_start: DateType,
+    ) -> Dict[str, Any] | None:
+        """
+        Get bill row for a SPECIFIC cycle.
+
+        IMPORTANT RULE:
+        - cycle_start defines the identity of a billing cycle
+
+        Used to decide:
+        - update existing row
+        - OR create new row
+        """
+
+        rows = (
+            self.supabase
+            .table("billprediction")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("cycle_start", cycle_start.isoformat())
+            .limit(1)
+            .execute()
+        ).data or []
+
+        return rows[0] if rows else None
+
+
+    def save_current_cycle_bill(self, user_id: str, payload: Dict[str, Any]) -> int:
+        """
+        Save billprediction row for CURRENT cycle.
+
+        Logic:
+        1. Check if row exists for same user + cycle_start
+        2. If yes → UPDATE
+        3. If no  → INSERT new row
+        """
+
+        cycle_start = DateType.fromisoformat(str(payload["cycle_start"])[:10])
+
+        current_row = self.get_bill_row_by_cycle(user_id, cycle_start)
+
+        # ---- UPDATE EXISTING ROW ----
         if current_row:
             limit_id = int(current_row.get("limit_id") or 0)
 
@@ -111,6 +270,7 @@ class DatabaseManager:
 
             return limit_id
 
+        # ---- INSERT NEW ROW ----
         result = (
             self.supabase
             .table("billprediction")
@@ -119,12 +279,16 @@ class DatabaseManager:
         )
 
         data = getattr(result, "data", None) or []
-        if data:
-            return int(data[0].get("limit_id") or 0)
+        return int(data[0].get("limit_id") or 0) if data else 0
+    
+    
+    
 
-        return 0
 
-    # =========================================================
+
+
+
+ # =========================================================
     # USERS (new)
     # ---------------------------------------------------------
     # These methods are required by the recommendation feature:

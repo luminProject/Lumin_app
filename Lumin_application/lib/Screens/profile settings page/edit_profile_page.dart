@@ -17,17 +17,6 @@ import 'package:lumin_application/theme/app_colors.dart';
 import 'package:lumin_application/services/api_service.dart';
 import 'package:lumin_application/Classes/user_model.dart';
 
-/// EditProfilePage allows the user to:
-/// - Update full name
-/// - Update phone number
-/// - Update energy source
-/// - If energy source is Grid + Solar, choose whether the user has solar panels
-/// - Pick and save home location (lat/lng)
-/// - Upload avatar to Supabase Storage and save its public URL via backend API
-///
-/// Architecture:
-/// - It calls ApiService methods for backend operations.
-/// - Supabase is used for authentication + storage (avatars bucket).
 class EditProfilePage extends StatefulWidget {
   const EditProfilePage({super.key});
 
@@ -39,42 +28,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
 
-  /// API client for backend requests (FastAPI).
   final ApiService _api = ApiService();
 
-  // ===== Phone state =====
-  /// Full phone number including country code (+966...).
   String _fullPhone = '';
-
-  /// Local digits only (used for validation).
   String _localPhoneDigits = '';
-
-  /// Default country for IntlPhoneField.
   String _initialCountryCode = 'SA';
-
-  /// Local phone digits used as initial value in IntlPhoneField.
   String _initialPhoneLocal = '';
 
-  // ===== UI state =====
   bool _loading = true;
   bool _saving = false;
 
-  // ===== Validation errors =====
   String? _phoneError;
   String? _solarPanelsError;
+  String? _billingDateError;
 
-  // ===== Avatar state =====
   final _picker = ImagePicker();
   bool _uploadingAvatar = false;
-
-  /// Public avatar image URL (optional).
   String? _avatarUrl;
 
-  // ===== Profile fields =====
   String _energySource = 'Grid only';
   bool? _hasSolarPanels;
   double? _latitude;
   double? _longitude;
+
+  DateTime? _lastBillingEndDate;
 
   @override
   void initState() {
@@ -88,10 +65,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
     super.dispose();
   }
 
-  /// Returns current user id (null if not logged in).
   String? _uid() => Supabase.instance.client.auth.currentUser?.id;
 
-  /// Shows a styled toast/snackbar message.
   void _toast(String msg, {bool success = true}) {
     if (!mounted) return;
 
@@ -141,10 +116,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       );
   }
 
-  /// Prepares IntlPhoneField initial values based on saved backend phone.
-  /// Currently handles Saudi (+966) only; can be extended later.
   void _preparePhoneInitial(String phone) {
     final p = phone.trim();
+
     if (p.startsWith('+966')) {
       _initialCountryCode = 'SA';
       _initialPhoneLocal = p.replaceFirst('+966', '').trim();
@@ -154,38 +128,39 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  /// Validator for name field.
   String? _validateName(String? v) {
     final s = (v ?? '').trim();
+
     if (s.isEmpty) return 'Name is required';
     if (s.length < 3) return 'Name is too short';
+
     return null;
   }
 
-  /// Validator for phone digits only (local part).
-  /// This ensures basic sanity before saving.
   String? _validatePhoneLocalDigits(String digits) {
     final d = digits.trim();
+
     if (d.isEmpty) return 'Phone number is required';
     if (!RegExp(r'^\d+$').hasMatch(d)) return 'Phone must contain numbers only';
 
     final allSame = d.split('').every((c) => c == d[0]);
     if (allSame) return 'Phone number looks invalid';
+
     if (RegExp(r'^123456').hasMatch(d)) return 'Phone number looks invalid';
 
     if (d.length < 8 || d.length > 12) return 'Phone length is invalid';
+
     return null;
   }
 
-  /// Validates solar panels selection only when energy source is Grid + Solar.
   String? _validateSolarPanels() {
     if (_energySource == 'Grid + Solar' && _hasSolarPanels == null) {
       return 'Please choose whether you have solar panels';
     }
+
     return null;
   }
 
-  /// Loads profile data from backend and fills UI controllers/state.
   Future<void> _loadProfile() async {
     final userId = _uid();
     final token = Supabase.instance.client.auth.currentSession?.accessToken;
@@ -213,9 +188,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
           : user.energySource.trim();
 
       _hasSolarPanels = user.hasSolarPanels;
-
       _latitude = user.latitude;
       _longitude = user.longitude;
+      _lastBillingEndDate = user.lastBillingEndDate;
 
       _preparePhoneInitial(_fullPhone);
 
@@ -227,6 +202,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       _phoneError = null;
       _solarPanelsError = null;
+      _billingDateError = null;
     } catch (e) {
       _toast('Failed to load profile: $e', success: false);
     } finally {
@@ -234,7 +210,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  /// Saves profile changes to backend.
   Future<void> _saveProfile() async {
     final ok = _formKey.currentState?.validate() ?? false;
     final phoneErr = _validatePhoneLocalDigits(_localPhoneDigits);
@@ -243,6 +218,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     setState(() {
       _phoneError = phoneErr;
       _solarPanelsError = solarErr;
+      _billingDateError = null;
     });
 
     if (!ok || phoneErr != null || solarErr != null) {
@@ -252,6 +228,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     final userId = _uid();
     final token = Supabase.instance.client.auth.currentSession?.accessToken;
+
     if (userId == null || token == null) {
       _toast('Not logged in', success: false);
       return;
@@ -264,11 +241,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
         username: _nameCtrl.text.trim(),
         phoneNumber: _fullPhone.trim(),
         energySource: _energySource,
-        hasSolarPanels:
-            _energySource == 'Grid + Solar' ? _hasSolarPanels : null,
+        hasSolarPanels: _energySource == 'Grid + Solar' ? _hasSolarPanels : null,
         latitude: _latitude,
         longitude: _longitude,
         avatarUrl: _avatarUrl,
+        lastBillingEndDate: _lastBillingEndDate,
       );
 
       await _api.updateProfile(userId, model.toUpdateJson());
@@ -282,10 +259,116 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  /// Picks a start location for map:
-  /// - If user already saved lat/lng -> use it
-  /// - Else use GPS if possible
-  /// - Else fallback to a default coordinate
+  Future<void> _pickBillingEndDate() async {
+    final now = DateTime.now();
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _lastBillingEndDate ?? now,
+      firstDate: DateTime.now().subtract(const Duration(days: 45)),
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: AppColors.mint,
+              onPrimary: Colors.black,
+              surface: Color(0xFF0F1713),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      _lastBillingEndDate = picked;
+      _billingDateError = null;
+    });
+  }
+
+  Widget _billingInfoHint() {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.info_outline_rounded,
+              size: 16,
+              color: Colors.white.withOpacity(0.6),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'The end date of the billing period from your previous bill (not the payment due date).',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.55),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    
+  Widget _billingDateField() {
+    final text = _lastBillingEndDate == null
+        ? 'Select your latest bill end date'
+        : '${_lastBillingEndDate!.year}-${_lastBillingEndDate!.month.toString().padLeft(2, '0')}-${_lastBillingEndDate!.day.toString().padLeft(2, '0')}';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _pickBillingEndDate,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: _billingDateError != null
+                ? Colors.redAccent.withOpacity(0.8)
+                : Colors.white.withOpacity(0.10),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.calendar_month_rounded,
+              color: AppColors.mint,
+              size: 21,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: _lastBillingEndDate == null
+                      ? Colors.white.withOpacity(0.45)
+                      : Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.edit_calendar_rounded,
+              color: Colors.white.withOpacity(0.55),
+              size: 19,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<LatLng> _getStartLocation() async {
     if (_latitude != null && _longitude != null) {
       return LatLng(_latitude!, _longitude!);
@@ -296,9 +379,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return const LatLng(21.4858, 39.1925);
+
+    if (!serviceEnabled) {
+      return const LatLng(21.4858, 39.1925);
+    }
 
     var perm = await Geolocator.checkPermission();
+
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
     }
@@ -316,8 +403,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return LatLng(pos.latitude, pos.longitude);
   }
 
-  /// Shows bottom sheet map picker.
-  /// Updates _latitude/_longitude when user taps Save.
   Future<void> _pickOnMapInline() async {
     final start = await _getStartLocation();
     LatLng selected = start;
@@ -422,11 +507,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
         _latitude = result.latitude;
         _longitude = result.longitude;
       });
+
       _toast('Location selected');
     }
   }
 
-  /// Preview map (non-interactive).
   Widget _homeMapPreview() {
     final hasLoc = _latitude != null && _longitude != null;
     final center = hasLoc
@@ -502,16 +587,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 
-  /// Avatar flow:
-  /// 1) Pick image from gallery
-  /// 2) Upload to Supabase Storage bucket: "avatars"
-  /// 3) Get public URL
-  /// 4) Save public URL in backend profile via ApiService.updateAvatarUrl()
   Future<void> _pickAndUploadAvatar() async {
     if (_uploadingAvatar) return;
 
     final user = Supabase.instance.client.auth.currentUser;
     final token = Supabase.instance.client.auth.currentSession?.accessToken;
+
     if (user == null || token == null) {
       _toast('Not logged in', success: false);
       return;
@@ -532,17 +613,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final ext = picked.path.split('.').last.toLowerCase();
       final filePath = '${user.id}/avatar.$ext';
 
-      await Supabase.instance.client.storage
-          .from('avatars')
-          .uploadBinary(
+      await Supabase.instance.client.storage.from('avatars').uploadBinary(
             filePath,
             bytes,
             fileOptions: const FileOptions(upsert: true),
           );
 
-      final publicUrl = Supabase.instance.client.storage
-          .from('avatars')
-          .getPublicUrl(filePath);
+      final publicUrl =
+          Supabase.instance.client.storage.from('avatars').getPublicUrl(filePath);
 
       await _api.updateAvatarUrl(user.id, publicUrl);
 
@@ -653,6 +731,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                             ],
                             onChanged: (v) {
                               if (v == null) return;
+
                               setState(() {
                                 _energySource = v;
 
@@ -727,9 +806,27 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           ],
 
                           const SizedBox(height: 18),
+                          _label('Billing Period End Date'),
+                          
+                          const SizedBox(height: 8),
+                          _billingInfoHint(),
+                          const SizedBox(height: 10),
+                          _billingDateField(),
+                          if (_billingDateError != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              _billingDateError!,
+                              style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 18),
                           _label('Home Location'),
                           const SizedBox(height: 10),
-
                           Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
@@ -751,9 +848,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                         color: AppColors.mint.withOpacity(0.16),
                                         borderRadius: BorderRadius.circular(14),
                                         border: Border.all(
-                                          color: AppColors.mint.withOpacity(
-                                            0.35,
-                                          ),
+                                          color: AppColors.mint.withOpacity(0.35),
                                         ),
                                       ),
                                       child: const Icon(
@@ -768,18 +863,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                       child: ElevatedButton(
                                         onPressed: _pickOnMapInline,
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(
-                                            0xFF3F8E6B,
-                                          ),
+                                          backgroundColor:
+                                              const Color(0xFF3F8E6B),
                                           foregroundColor: Colors.white,
                                           elevation: 0,
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 14,
                                           ),
                                           shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              18,
-                                            ),
+                                            borderRadius:
+                                                BorderRadius.circular(18),
                                           ),
                                         ),
                                         child: const FittedBox(
@@ -914,11 +1007,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 
-  /// Avatar image widget:
-  /// - If url is empty -> show nothing
-  /// - If network fails -> show nothing (no error UI)
   Widget _avatarImage() {
     final url = (_avatarUrl ?? '').trim();
+
     if (url.isEmpty) return const SizedBox.shrink();
 
     return Image.network(
@@ -997,7 +1088,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       onChanged: (phone) {
         _fullPhone = phone.completeNumber;
         _localPhoneDigits = phone.number.replaceAll(RegExp(r'\D'), '');
+
         final err = _validatePhoneLocalDigits(_localPhoneDigits);
+
         setState(() => _phoneError = err);
       },
     );
@@ -1027,9 +1120,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               : Colors.white.withOpacity(0.04),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected
-                ? AppColors.mint
-                : Colors.white.withOpacity(0.10),
+            color: isSelected ? AppColors.mint : Colors.white.withOpacity(0.10),
             width: isSelected ? 1.4 : 1,
           ),
         ),
@@ -1052,9 +1143,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
             ),
             Icon(
-              isSelected
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off,
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
               color: isSelected ? AppColors.mint : Colors.white38,
               size: 20,
             ),

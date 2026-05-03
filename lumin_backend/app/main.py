@@ -16,6 +16,8 @@ Responsibilities:
 """
 
 from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Header 
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.Bill_scheduler import setup_scheduler, shutdown_scheduler
@@ -24,7 +26,7 @@ from datetime import datetime
 import os
 import logging
 from dotenv import load_dotenv
-
+from app.supabase_client import extract_bearer, get_supabase_for_jwt, supabase_admin, verify_user_access
 from app.routers import router as profile_router
 from app.routers.recommendation_router import router as recommendation_router
 from app.core.lumin_facade import LuminFacade
@@ -52,6 +54,8 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY in .env")
 
 
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 # -----------------------------
 # Supabase Client Initialization
 # -----------------------------
@@ -63,9 +67,9 @@ supabase = supabase_.create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Facade instance (central system interface)
 facade = LuminFacade(supabase)
+# Admin facade for system jobs/schedulers
+admin_facade = LuminFacade(supabase_admin)
 
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -80,7 +84,7 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Recommendation scheduler started — runs at 3 PM and 7 PM Saudi time.")
 
     # Bill scheduler
-    setup_scheduler(facade)
+    setup_scheduler(admin_facade)
     logger.info("✅ Bill scheduler started.")
 
     yield  # Server is running
@@ -313,38 +317,64 @@ def update_device(device_id: int, payload: DeviceUpdate):
 class BillLimitIn(BaseModel):
     limit_amount: float
 @app.get("/bill/{user_id}")
-def get_my_current_bill(user_id: str):
-    try:
-        return {"status": "success", 
-                "data": facade.get_my_current_bill(user_id)}
+def get_my_current_bill(
+    user_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    try: 
+        verify_user_access(user_id, authorization)
+        jwt = extract_bearer(authorization)
+        user_supabase = get_supabase_for_jwt(jwt)
+        bill_facade = LuminFacade(user_supabase)
+
+        return {
+            "status": "success",
+            "data": bill_facade.get_my_current_bill(user_id),
+        }
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/bill/{user_id}")
-def set_bill_limit(user_id: str, payload: BillLimitIn):
-    facade.set_bill_limit(user_id, payload.limit_amount)
+def set_bill_limit(
+    user_id: str,
+    payload: BillLimitIn,
+    authorization: Optional[str] = Header(None),
+):
     try:
-        return {"status": "success", "data": facade.get_my_current_bill(user_id) }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        verify_user_access(user_id, authorization)
+        jwt = extract_bearer(authorization)
+        user_supabase = get_supabase_for_jwt(jwt)
+        bill_facade = LuminFacade(user_supabase)
+        bill_facade.set_bill_limit(user_id, payload.limit_amount)
 
-
-@app.post("/internal/run-bill-checkpoint/{checkpoint_day}")
-def run_bill_checkpoint_manually(checkpoint_day: int):
-    try:
-        if checkpoint_day not in [7, 14, 21, 28]:
-            raise HTTPException(status_code=400, detail="checkpoint_day must be 7, 14, 21, or 28")
-        print(f"✅ Job triggered (day {checkpoint_day})")
         return {
             "status": "success",
-            "data": facade.run_bill_checkpoint_for_all_users(checkpoint_day)
+            "data": bill_facade.get_my_current_bill(user_id),
         }
+
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/internal/run-bill-checkpoint")
+def run_bill_checkpoint():
+    try:
+        return {
+            "status": "success",
+            "data": admin_facade.run_bill_checkpoint_for_all_users()
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
  
+
 
 # -----------------------------
 # Solar Forecast Endpoint

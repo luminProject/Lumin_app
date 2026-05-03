@@ -6,6 +6,7 @@ class UserModel {
   final bool? hasSolarPanels;
   final double? latitude;
   final double? longitude;
+  final DateTime? lastBillingEndDate;
 
   const UserModel({
     required this.username,
@@ -15,6 +16,7 @@ class UserModel {
     this.hasSolarPanels,
     this.latitude,
     this.longitude,
+    this.lastBillingEndDate,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -30,6 +32,8 @@ class UserModel {
         ? json['has_solar_panels'] as bool
         : null;
 
+    final rawBillingDate = json['last_billing_end_date'];
+
     return UserModel(
       username: (json['username'] ?? '').toString().trim(),
       phoneNumber: (json['phone_number'] ?? '').toString().trim(),
@@ -38,6 +42,9 @@ class UserModel {
       hasSolarPanels: hasSolarPanels,
       latitude: (lat is num) ? lat.toDouble() : null,
       longitude: (lon is num) ? lon.toDouble() : null,
+      lastBillingEndDate: rawBillingDate == null
+          ? null
+          : DateTime.tryParse(rawBillingDate.toString()),
     );
   }
 
@@ -45,11 +52,14 @@ class UserModel {
     return {
       'username': username.trim(),
       'phone_number': phoneNumber.trim(),
+      'avatar_url': avatarUrl,
       'energy_source': energySource.trim(),
       'has_solar_panels':
           energySource == 'Grid + Solar' ? hasSolarPanels : null,
       'latitude': latitude,
       'longitude': longitude,
+      'last_billing_end_date':
+          lastBillingEndDate?.toIso8601String().split('T').first,
     };
   }
 
@@ -61,7 +71,9 @@ class UserModel {
     bool? hasSolarPanels,
     double? latitude,
     double? longitude,
+    DateTime? lastBillingEndDate,
     bool clearHasSolarPanels = false,
+    bool clearLastBillingEndDate = false,
   }) {
     return UserModel(
       username: username ?? this.username,
@@ -72,6 +84,9 @@ class UserModel {
           clearHasSolarPanels ? null : (hasSolarPanels ?? this.hasSolarPanels),
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      lastBillingEndDate: clearLastBillingEndDate
+          ? null
+          : (lastBillingEndDate ?? this.lastBillingEndDate),
     );
   }
 }

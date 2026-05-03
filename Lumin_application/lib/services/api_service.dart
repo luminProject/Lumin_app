@@ -158,7 +158,10 @@ class ApiService {
   Future<Map<String, dynamic>> getBill() async {
     final url = '$baseUrl/bill/$_userId';
 
-    final response = await http.get(Uri.parse(url), headers: authHeaders());
+    final response = await http.get(
+      Uri.parse(url),
+      headers: authHeaders(),
+    );
 
     debugPrint('GET BILL -> $url');
     debugPrint('GET BILL <- status=${response.statusCode}');
@@ -179,21 +182,34 @@ class ApiService {
     final response = await http.post(
       Uri.parse(url),
       headers: authHeaders(json: true),
-      body: json.encode({'limit_amount': billLimit}),
+      body: json.encode({
+        'limit_amount': billLimit,
+      }),
     );
-
-    debugPrint('POST BILL LIMIT -> $url');
-    debugPrint('POST BILL LIMIT <- status=${response.statusCode}');
-    debugPrint('POST BILL LIMIT <- body=${response.body}');
 
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'];
+    } else if (response.statusCode == 401 || response.statusCode == 403) {
+      throw Exception('Your session has expired. Please sign in again.');
     } else {
-      throw Exception('Failed to save bill limit: ${response.body}');
+      String message = 'Unable to save your bill limit right now. Please try again.';
+
+      try {
+        final errorBody = json.decode(response.body);
+        if (errorBody is Map && errorBody['detail'] != null) {
+          message = errorBody['detail'].toString();
+        }
+      } catch (_) {}
+
+      throw Exception(message);
     }
   }
-
+  
+  
+  
+  
+  
   // ===== Energy =====
 
   /// GET /energy/{userId}

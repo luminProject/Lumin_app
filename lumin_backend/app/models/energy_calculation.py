@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date as DateType
+import datetime
+from zoneinfo import ZoneInfo
 from typing import List, Any
 from uuid import UUID
 from calendar import monthrange
@@ -84,28 +86,26 @@ class EnergyCalculation(Observer):
         """
         Business logic only.
 
-        Receives raw monthly energy rows that were already fetched
-        by DatabaseManager, then transforms them into a clean monthly
-        usage summary ready for bill prediction.
+        The method name is kept to avoid breaking existing code.
+        However, rows are now already filtered by billing cycle, not calendar month.
         """
-        today = DateType.today()
-        billing_month = today.replace(day=1)
-        days_in_month = monthrange(today.year, today.month)[1]
+        today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
+
+        # Fixed billing cycle length.
+        days_in_month = 30
 
         if not rows:
             return {
                 "user_id": str(self.user_id),
                 "energy_id": self.Energy_id,
                 "date": today.isoformat(),
-                "billing_month": billing_month.isoformat(),
-                "days_passed": 0,
                 "days_in_month": days_in_month,
                 "daily_net_values": [],
+                "daily_dates": [],
                 "current_usage_kwh": 0.0,
             }
 
         daily_map: dict[str, float] = {}
-        latest_calculation_id = 0
 
         for row in rows:
             row_date = row.get("date")
@@ -120,24 +120,19 @@ class EnergyCalculation(Observer):
             daily_grid_consumption = max(daily_consumption - daily_solar, 0.0)
 
             daily_map[day_str] = daily_map.get(day_str, 0.0) + daily_grid_consumption
-            latest_calculation_id = int(row.get("calculation_id") or latest_calculation_id)
 
         sorted_days = sorted(daily_map.keys())
         daily_net_values = [round(daily_map[day], 2) for day in sorted_days]
         current_usage_kwh = round(sum(daily_net_values), 2)
 
-        self.Energy_id = latest_calculation_id
         self.total_consumption = current_usage_kwh
-        
 
         return {
             "user_id": str(self.user_id),
             "energy_id": self.Energy_id,
             "date": today.isoformat(),
-            "billing_month": billing_month.isoformat(),
-            "days_passed": len(sorted_days),
             "days_in_month": days_in_month,
             "daily_net_values": daily_net_values,
+            "daily_dates": sorted_days,
             "current_usage_kwh": current_usage_kwh,
         }
-        

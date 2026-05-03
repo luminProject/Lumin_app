@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
+from datetime import date
 from pydantic import BaseModel
-from supabase import Client
+
 
 
 class User(BaseModel):
@@ -13,59 +14,7 @@ class User(BaseModel):
     has_solar_panels: Optional[bool] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    last_billing_end_date: Optional[date] = None
 
     def to_dict(self) -> dict:
-        return self.dict()
-
-    @staticmethod
-    def get_profile(db: Client, user_id: str) -> "User":
-        resp = (
-            db.table("users")
-            .select("*")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-
-        rows = resp.data or []
-
-        if rows:
-            return User(**rows[0])
-
-        new_row = {
-            "user_id": user_id,
-            "username": "",
-            "phone_number": "",
-            "location": None,
-            "avatar_url": None,
-            "energy_source": "Grid only",
-            "has_solar_panels": None,
-            "latitude": None,
-            "longitude": None,
-        }
-
-        insert_resp = db.table("users").insert(new_row).execute()
-        inserted_rows = insert_resp.data or []
-
-        if not inserted_rows:
-            raise ValueError("Failed to create profile")
-
-        return User(**inserted_rows[0])
-
-    @staticmethod
-    def update_profile(db: Client, user_id: str, info: Dict[str, Any]) -> "User":
-        info.pop("user_id", None)
-
-        User.get_profile(db, user_id)
-
-        if "energy_source" in info:
-            energy_source = info.get("energy_source")
-            if energy_source == "Grid only":
-                info["has_solar_panels"] = None
-
-        if not info:
-            return User.get_profile(db, user_id)
-
-        db.table("users").update(info).eq("user_id", user_id).execute()
-
-        return User.get_profile(db, user_id)
+        return self.model_dump()

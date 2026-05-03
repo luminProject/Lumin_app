@@ -3,7 +3,8 @@ import datetime
 from typing import List, Dict, Any
 from app.supabase_client import supabase
 from app.models.user import User
-
+from zoneinfo import ZoneInfo
+from datetime import date as DateType
 from app.models.energy_calculation import EnergyCalculation
 from app.models.notification import Notification
 from app.models.bill_prediction import BillPrediction
@@ -175,15 +176,96 @@ class LuminFacade:
         }
 
     # -----------------------------
-    # PROFILE (for Shrooq page)
+    # PROFILE 
     # -----------------------------
     def get_profile(self, user_id: str) -> dict:
-        user = User.get_profile(self.supabase, user_id)
+        """
+        Get user profile.
+
+        Facade handles:
+        - reading raw row from DatabaseManager
+        - creating default row if missing
+        - converting row into User model
+        """
+
+        row = self.db.get_user_profile_row(user_id)
+
+        if not row:
+            default_row = {
+                "user_id": user_id,
+                "username": "",
+                "phone_number": "",
+                "location": None,
+                "avatar_url": None,
+                "energy_source": "Grid only",
+                "has_solar_panels": None,
+                "latitude": None,
+                "longitude": None,
+                "last_billing_end_date": None,
+            }
+
+            row = self.db.insert_user_profile_row(default_row)
+
+        user = User(**row)
         return user.to_dict()
 
     def update_profile(self, user_id: str, info: Dict[str, Any]) -> dict:
-        user = User.update_profile(self.supabase, user_id, info)
+        """
+        Update user profile.
+
+        Facade handles profile business rules.
+        DatabaseManager only performs read/write.
+        """
+
+        clean_info = dict(info)
+        clean_info.pop("user_id", None)
+
+        if clean_info.get("energy_source") == "Grid only":
+            clean_info["has_solar_panels"] = None
+
+        if clean_info.get("last_billing_end_date"):
+            selected = clean_info["last_billing_end_date"]
+
+            if isinstance(selected, str):
+                selected = DateType.fromisoformat(selected[:10])
+
+            today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
+
+            if selected > today:
+                raise ProfileValidationError(
+                    "Billing period end date cannot be in the future."
+                )
+
+            if selected < today - timedelta(days=45):
+                raise ProfileValidationError(
+                    "Billing period end date is too old. Please use a recent bill."
+                ) 
+            clean_info["last_billing_end_date"] = selected.isoformat()    
+        row = self.db.get_user_profile_row(user_id)
+
+        if not row:
+            default_row = {
+                "user_id": user_id,
+                "username": "",
+                "phone_number": "",
+                "location": None,
+                "avatar_url": None,
+                "energy_source": "Grid only",
+                "has_solar_panels": None,
+                "latitude": None,
+                "longitude": None,
+                "last_billing_end_date": None,
+            }
+
+            row = self.db.insert_user_profile_row(default_row)
+
+        if clean_info:
+            row = self.db.update_user_profile_row(user_id, clean_info)
+
+        user = User(**row)
         return user.to_dict()
+   
+   
     # -----------------------------
     # DEVICE MANAGEMENT (DeviceFactory & Device Classes)
     # -----------------------------
@@ -318,123 +400,311 @@ class LuminFacade:
     # BILL PREDICTION
     # -----------------------------
 
+    def _get_current_cycle_dates(self, user_id: str) -> tuple[DateType, DateType]:
+        """
+        Get current billing cycle dates.
+
+        users.last_billing_end_date = last day included in the previous bill.
+        current cycle starts the next day.
+        cycle length = 30 days.
+        """
+        today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
+
+        last_end = self.db.get_user_last_billing_end_date(user_id)
+
+        if last_end is None:
+            raise ValueError(
+                "Please set your last billing end date from your latest electricity bill."
+            )
+
+        cycle_start = last_end + timedelta(days=1)
+        cycle_end = cycle_start + timedelta(days=29)
+
+        # If current stored date is old, move cycle forward.
+        while today > cycle_end:
+            last_end = cycle_end
+            self.db.update_user_last_billing_end_date(user_id, last_end)
+
+            cycle_start = last_end + timedelta(days=1)
+            cycle_end = cycle_start + timedelta(days=29)
+
+        return cycle_start, cycle_end
+
+
+    # =========================
+    # BILL LIMIT
+    # =========================
     def set_bill_limit(self, user_id: str, limit: int | float) -> None:
-        current_bill_row = self.db.get_current_month_bill_row(user_id)
-
-        bill_manager = BillPrediction(user_id)
-        bill_manager.loadCurrentMonth(current_bill_row)
-        bill_manager.setLimit(limit)
-
-        payload = bill_manager.build_db_payload()
-        saved_limit_id = self.db.save_current_month_bill(user_id, payload)
-        bill_manager.setLimitId(saved_limit_id)
-
-       
-
-    def get_my_current_bill(self, user_id: str) -> Dict[str, Any]:
         """
-        GET /bill:
-        update current values only
+        Set or update the user's bill limit for the current billing cycle.
+
+        Important:
+        - Uses the current billing cycle.
+        - If the current cycle row exists, it updates it.
+        - If not, it carries only limit_amount from the latest old row.
         """
-        energy_rows = self.db.get_current_month_energy_rows(user_id)
-        current_bill_row = self.db.get_current_month_bill_row(user_id)
+        if not user_id:
+            raise ValueError("Your session has expired. Please sign in again.")
+
+        cycle_start, cycle_end = self._get_current_cycle_dates(user_id)
+
+        # Get exact row for current billing cycle.
+        current_bill_row = self.db.get_bill_row_by_cycle(user_id, cycle_start)
+
+        # If no current-cycle row exists, carry only limit_amount from latest row.
+        # Do NOT carry old prediction/checkpoint data.
+        if not current_bill_row:
+            latest_bill_row = self.db.get_latest_bill_row(user_id)
+
+            if latest_bill_row:
+                current_bill_row = {
+                    "limit_amount": latest_bill_row.get("limit_amount"),
+                }
+
+        energy_rows = self.db.get_current_cycle_energy_rows(
+            user_id,
+            cycle_start,
+            cycle_end,
+        )
 
         energy_monitor = EnergyCalculation(user_id)
         bill_data = energy_monitor.get_current_month_usage(rows=energy_rows)
 
         bill_manager = BillPrediction(user_id)
-        bill_manager.loadCurrentMonth(current_bill_row)
-        bill_manager.syncActualFromBillData(bill_data)
-
-        payload = bill_manager.build_db_payload()
-        saved_limit_id = self.db.save_current_month_bill(user_id, payload)
-        bill_manager.setLimitId(saved_limit_id)
-
-        return bill_manager.to_dict()
-
-        
-
-
-    def run_bill_checkpoint_for_user(self, user_id: str, checkpoint_day: int) -> Dict[str, Any]:
-        """
-        Called by APScheduler.
-        Official forecast logic stays inside BillPrediction.
-        """
-
-        # 1) get all current month rows
-        energy_rows = self.db.get_current_month_energy_rows(user_id)
-        current_bill_row = self.db.get_current_month_bill_row(user_id)
-
-        # 2) build cutoff date = end of checkpoint day
-        today = DateType.today()
-        cutoff_date = today.replace(day=checkpoint_day)
-
-        # 3) keep only rows up to checkpoint day
-        filtered_rows = []
-        for row in energy_rows:
-            row_date = row.get("date")
-            if not row_date:
-                continue
-
-            row_date_only = DateType.fromisoformat(str(row_date)[:10])
-
-            if row_date_only <= cutoff_date:
-                filtered_rows.append(row)
-
-        # 4) build monthly summary only from filtered rows
-        energy_monitor = EnergyCalculation(user_id)
-        bill_data = energy_monitor.get_current_month_usage(rows=filtered_rows)
-
-        # 5) load current bill state
-        bill_manager = BillPrediction(user_id)
-        bill_manager.loadCurrentMonth(current_bill_row)
-
-        # 6) run scheduled checkpoint
-        bill_manager.runScheduledCheckpoint(
-            checkpoint_day=checkpoint_day,
-            bill_data=bill_data,
+        bill_manager.load_and_sync_state(
+            current_bill_row,
+            bill_data,
+            cycle_start=cycle_start,
         )
 
-        # 7) optional warning notification
-        current_warning = bill_manager.compareActualWithPredicted()
+        bill_manager.setLimit(limit)
 
-        if current_warning == 1:
-            notification = Notification(
-                notification_id=0,
-                content="",
-                notification_type="bill_warning",
-                timestamp=datetime.datetime.utcnow(),
-                user_id=user_id,
-                supabase=self.supabase,
-            )
-            notification.setContent(
-                f"Warning: your predicted bill range ({bill_manager.Get_predicted_bill()} SAR) may exceed your monthly limit ({bill_manager.Get_limit_amount()} SAR)."
-            )
-            notification.sendNotification()
-
-        # 8) save updated state
         payload = bill_manager.build_db_payload()
-        saved_limit_id = self.db.save_current_month_bill(user_id, payload)
-        bill_manager.setLimitId(saved_limit_id)
+        self.db.save_current_cycle_bill(user_id, payload)
+
+
+    # =========================
+    # BILL GET
+    # =========================
+    def get_my_current_bill(self, user_id: str) -> Dict[str, Any]:
+        """
+        GET /bill.
+
+        Responsibilities:
+        - Calculate current billing cycle.
+        - Sync current usage/current bill.
+        - Save or update billprediction row.
+        - Return setup_required if billing date is missing.
+        """
+        try:
+            cycle_start, cycle_end = self._get_current_cycle_dates(user_id)
+
+        except ValueError as e:
+            return {
+                "user_id": user_id,
+                "limit_id": 0,
+                "limit_amount": None,
+                "actual_bill": 0.0,
+                "predicted_bill": 0.0,
+                "limit_warning": False,
+                "current_usage_kwh": 0.0,
+                "predicted_usage_kwh": 0.0,
+                "forecast_available": False,
+                "days_passed": 0,
+                "days_in_month": 30,
+                "last_checkpoint_day": None,
+                "cycle_start": None,
+                "setup_required": True,
+                "setup_message": str(e),
+            }
+
+        energy_rows = self.db.get_current_cycle_energy_rows(
+            user_id,
+            cycle_start,
+            cycle_end,
+        )
+
+        # Get exact row for current billing cycle.
+        current_bill_row = self.db.get_bill_row_by_cycle(user_id, cycle_start)
+
+        # If no current-cycle row exists, carry only limit_amount from latest row.
+        # This prevents old forecast/checkpoint data from leaking into a new cycle.
+        if not current_bill_row:
+            latest_bill_row = self.db.get_latest_bill_row(user_id)
+
+            if latest_bill_row:
+                current_bill_row = {
+                    "limit_amount": latest_bill_row.get("limit_amount"),
+                }
+
+        energy_monitor = EnergyCalculation(user_id)
+        bill_data = energy_monitor.get_current_month_usage(rows=energy_rows)
+
+        bill_manager = BillPrediction(user_id)
+        bill_manager.load_and_sync_state(
+            current_bill_row,
+            bill_data,
+            cycle_start=cycle_start,
+        )
+
+        payload = bill_manager.build_db_payload()
+        
+        self.db.save_current_cycle_bill(user_id, payload)
 
         return bill_manager.to_dict()
-    def run_bill_checkpoint_for_all_users(self, checkpoint_day: int) -> Dict[str, Any]:
-        if checkpoint_day not in [7, 14, 21, 28]:
-            raise ValueError("checkpoint_day must be one of: 7, 14, 21, 28")
 
-        user_ids = self.db.get_users_with_current_month_energy()
+
+    # =========================
+    # BILL CHECKPOINT SCHEDULER
+    # =========================
+    def run_bill_checkpoint_for_user(self, user_id: str) -> Dict[str, Any]:
+        """
+        Called by APScheduler daily.
+
+        Important:
+        - Facade only prepares data and sends notification.
+        - BillPrediction.PredictBill decides if checkpoint 7/14/21/28 is due.
+        - Forecast uses completed days only.
+        """
+        cycle_start, cycle_end = self._get_current_cycle_dates(user_id)
+
+        energy_rows = self.db.get_current_cycle_energy_rows(
+            user_id,
+            cycle_start,
+            cycle_end,
+        )
+
+        # Get exact row for current billing cycle.
+        current_bill_row = self.db.get_bill_row_by_cycle(user_id, cycle_start)
+
+        # If no current-cycle row exists, carry only limit_amount from latest row.
+        # Do NOT carry predicted_bill, forecast_available, or last_checkpoint_day.
+        if not current_bill_row:
+            latest_bill_row = self.db.get_latest_bill_row(user_id)
+
+            if latest_bill_row:
+                current_bill_row = {
+                    "limit_amount": latest_bill_row.get("limit_amount"),
+                }
+
+        energy_monitor = EnergyCalculation(user_id)
+        bill_data = energy_monitor.get_current_month_usage(rows=energy_rows)
+
+        bill_manager = BillPrediction(user_id)
+        bill_manager.load_and_sync_state(
+            current_bill_row,
+            bill_data,
+            cycle_start=cycle_start,
+        )
+
+        old_checkpoint = bill_manager.get_last_checkpoint()
+
+        # PredictBill now decides internally whether a checkpoint is due.
+        checkpoint_day = bill_manager.PredictBill(bill_data)
+
+        if checkpoint_day is None:
+            return bill_manager.to_dict()
+
+        new_checkpoint = bill_manager.get_last_checkpoint()
+        # Send notification only once per checkpoint.
+        if new_checkpoint == checkpoint_day and old_checkpoint != checkpoint_day:
+
+            if bill_manager.Get_limit_amount() <= 0 :
+                payload = bill_manager.build_db_payload()
+                self.db.save_current_cycle_bill(user_id, payload)
+                return bill_manager.to_dict()
+            current_warning = bill_manager.compareActualWithPredicted()
+
+            notification_type = "bill_warning" if current_warning == 1 else "bill_update"
+
+            if checkpoint_day == 28:
+                if current_warning == 1:
+                    content = (
+                        f"Your estimated final bill is {bill_manager.Get_predicted_bill()} SAR, "
+                        f"which is above your {bill_manager.Get_limit_amount()} SAR limit."
+                    )
+                else:
+                    content = (
+                        f"Your estimated final bill is {bill_manager.Get_predicted_bill()} SAR "
+                        f"and is within your {bill_manager.Get_limit_amount()} SAR limit."
+                    )
+            else:
+                if current_warning == 1:
+                    content = (
+                        f"Your predicted bill is {bill_manager.Get_predicted_bill()} SAR, "
+                        f"which may exceed your {bill_manager.Get_limit_amount()} SAR limit. "
+                        f"Monitor your usage."
+                    )
+                else:
+                    content = (
+                        f"Your predicted bill is {bill_manager.Get_predicted_bill()} SAR "
+                        f"and is within your {bill_manager.Get_limit_amount()} SAR limit."
+                    )
+
+            notification = Notification(
+                notification_id=None,
+                user_id=user_id,
+                notification_type=notification_type,
+                content=content,
+                timestamp=datetime.datetime.now(datetime.timezone.utc),
+            )
+            notification_payload = notification.to_dict()
+            self.db.insert_notification(notification_payload)
+            fcm_token = self.db.get_user_fcm_token(user_id)
+
+            if fcm_token:
+                FCMService.send_push(
+                    fcm_token=fcm_token,
+                    title="LUMIN Bill Alert",
+                    body=content[:100],
+                )
+        payload = bill_manager.build_db_payload()
+        self.db.save_current_cycle_bill(user_id, payload)
+
+        return bill_manager.to_dict()
+
+
+    def run_bill_checkpoint_for_all_users(self) -> Dict[str, Any]:
+        """
+        Called by daily scheduler.
+
+        Runs bill checkpoint logic for all users who have energy rows.
+        One user failure should not stop the whole scheduler.
+        """
+        user_ids = self.db.get_users_with_energy()
+
         processed_users = 0
+        skipped_users = 0
+        errors: list[dict] = []
 
         for user_id in user_ids:
-            self.run_bill_checkpoint_for_user(user_id, checkpoint_day)
-            processed_users += 1
+            try:
+                self.run_bill_checkpoint_for_user(user_id)
+                processed_users += 1
+
+            except ValueError as e:
+                skipped_users += 1
+                errors.append({
+                    "user_id": user_id,
+                    "reason": str(e),
+                })
+
+            except Exception as e:
+                skipped_users += 1
+                errors.append({
+                    "user_id": user_id,
+                    "reason": str(e),
+                })
 
         return {
             "status": "success",
-            "checkpoint_day": checkpoint_day,
             "processed_users": processed_users,
+            "skipped_users": skipped_users,
+            "errors": errors,
         }
-  
+   
+   
+   
     # -----------------------------
     # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS 
     # -----------------------------
@@ -772,3 +1042,6 @@ class LuminFacade:
             "message": "Device information fetched successfully.",
             "data": info_list,
         }
+class ProfileValidationError(Exception):
+    """Raised when profile input is invalid"""
+    pass        
