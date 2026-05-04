@@ -291,41 +291,14 @@ class DatabaseManager:
  # =========================================================
     # USERS (new)
     # ---------------------------------------------------------
-    # These methods are required by the recommendation feature:
+    # NOTE: For reading the user profile, we reuse the existing
+    # get_user_profile_row() method defined above (USER PROFILE
+    # section) — no duplicate query is added here.
     #
-    # 1) get_user_profile():
-    #    The facade needs to know if a user owns solar panels
-    #    so it can decide whether to generate a SOLAR-based
-    #    recommendation (panels + shiftable devices logic) or
-    #    a GENERAL recommendation (random tip from DB).
-    #
-    # 2) get_user_fcm_token():
-    #    After saving a recommendation, the facade sends a push
-    #    notification to the user's phone via Firebase. Firebase
-    #    requires the device's FCM token, which is stored on the
-    #    users table in the 'fcm_token' column.
-    #
-    # Both methods follow the project pattern: Supabase queries
-    # belong ONLY here, not in the Facade or the Model.
+    # The only NEW user-related method is get_user_fcm_token(),
+    # required by the recommendation feature to send push
+    # notifications via Firebase.
     # =========================================================
-
-    def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Returns the user's solar status (has_solar_panels + energy_source).
-        Used by the facade to choose between Solar / General recommendation.
-        """
-        try:
-            response = (
-                self.supabase.table("users")
-                .select("has_solar_panels, energy_source")
-                .eq("user_id", user_id)
-                .limit(1)
-                .execute()
-            )
-            data = response.data or []
-            return data[0] if data else None
-        except Exception:
-            return None
 
     def get_user_fcm_token(self, user_id: str) -> Optional[str]:
         """

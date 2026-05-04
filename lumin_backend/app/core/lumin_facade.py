@@ -783,14 +783,14 @@ class LuminFacade:
 
         # Force solar (or auto with solar user)
         if recommendation_type == "solar":
-            user_profile = self.db.get_user_profile(user_id)
+            user_profile = self.db.get_user_profile_row(user_id)
             if Recommendation.userHasSolar(user_profile):
                 return self._generate_solar_recommendation(user_id)
             # Solar user without solar config → fall back to general
             return self._generate_general_recommendation(user_id)
 
         # Auto (manual API): decide based on profile
-        user_profile = self.db.get_user_profile(user_id)
+        user_profile = self.db.get_user_profile_row(user_id)
         if Recommendation.userHasSolar(user_profile):
             return self._generate_solar_recommendation(user_id)
         return self._generate_general_recommendation(user_id)
@@ -1044,4 +1044,4 @@ class LuminFacade:
         }
 class ProfileValidationError(Exception):
     """Raised when profile input is invalid"""
-    pass        
+    pass
