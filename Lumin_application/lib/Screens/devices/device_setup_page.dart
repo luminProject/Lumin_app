@@ -11,6 +11,7 @@ class DeviceSetupPage extends StatefulWidget {
   final String? initialRoom;
   final String? initialDeviceType;
   final String? initialPanelCapacity;
+  final bool initialIsShiftable;
 
   const DeviceSetupPage({
     super.key,
@@ -21,6 +22,7 @@ class DeviceSetupPage extends StatefulWidget {
     this.initialRoom,
     this.initialDeviceType,
     this.initialPanelCapacity,
+    this.initialIsShiftable = false,
   });
 
   @override
@@ -35,6 +37,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
 
   String? _selectedRoom;
   String _deviceType = 'consumption';
+  bool _isShiftable = false;
 
   @override
   void initState() {
@@ -43,6 +46,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
     _capacityCtrl.text = widget.initialPanelCapacity ?? '';
     _selectedRoom = widget.initialRoom;
     _deviceType = widget.initialDeviceType ?? 'consumption';
+    _isShiftable = _deviceType == 'consumption'
+        ? widget.initialIsShiftable
+        : false;
   }
 
   @override
@@ -160,6 +166,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
       "device_type": _deviceType,
       "room": _deviceType == 'production' ? null : _selectedRoom,
       "panel_capacity": isSolarPanel ? _capacityCtrl.text.trim() : null,
+      "is_shiftable": _deviceType == 'consumption' ? _isShiftable : false,
     };
 
     if (!widget.isEditMode) {
@@ -261,7 +268,10 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                       child: InkWell(
                         onTap: widget.isEditMode
                             ? null
-                            : () => setState(() => _deviceType = 'production'),
+                            : () => setState(() {
+                                _deviceType = 'production';
+                                _isShiftable = false;
+                              }),
                         borderRadius: BorderRadius.circular(14),
                         child: Container(
                           height: 52,
@@ -390,6 +400,76 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                         ),
                       ),
                     ],
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  const Text(
+                    'Is this device shiftable?',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Can you run this device at any time of day? For example, washing machine or dishwasher.',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.65),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withOpacity(0.10)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Shiftable device',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Enable this for flexible devices that can be scheduled later.',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.58),
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: _isShiftable,
+                          activeColor: AppColors.mint,
+                          onChanged: (value) {
+                            setState(() {
+                              _isShiftable = value;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
                   ),
 
                   const SizedBox(height: 18),

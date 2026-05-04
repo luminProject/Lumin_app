@@ -269,7 +269,7 @@ class LuminFacade:
     # -----------------------------
     # DEVICE MANAGEMENT (DeviceFactory & Device Classes)
     # -----------------------------
-    def add_new_device(self, user_id: str, name: str, device_type: str, panel_capacity: float | None = None) -> Dict[str, Any]:
+    def add_new_device(self, user_id: str, name: str, device_type: str, panel_capacity: float | None = None, is_shiftable: bool = False) -> Dict[str, Any]:
         """
         إضافة جهاز جديد (سواء كان جهاز استهلاك ConsumptionDevice أو إنتاج ProductionDevice)
         """
@@ -281,6 +281,7 @@ class LuminFacade:
                 "device_name": name,
                 "device_type": device_type,  # e.g., 'consumption' or 'production'
                 "panel_capacity": panel_capacity,
+                "is_shiftable": is_shiftable if device_type == "consumption" else False,
             })
             .execute()
         )
@@ -705,6 +706,29 @@ class LuminFacade:
    
    
    
+
+    # -----------------------------
+    # MONTHLY TOTAL ENERGY RESET
+    # -----------------------------
+    def reset_monthly_total_energy(self) -> Dict[str, Any]:
+        """
+        Reset total_energy for all devices at the beginning of each month.
+        Historical sensor_data readings are not deleted.
+        """
+        res = (
+            self.supabase
+            .table("device")
+            .update({"total_energy": 0})
+            .neq("device_id", -1)
+            .execute()
+        )
+
+        return {
+            "status": "monthly_total_energy_reset_done",
+            "message": "Monthly total_energy reset successfully.",
+            "data": res.data or [],
+        }
+
     # -----------------------------
     # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS 
     # -----------------------------

@@ -154,6 +154,7 @@ class DeviceCreate(BaseModel):
     """
     name: str
     device_type: str
+    is_shiftable: bool = False
 
 
 # Model for updating device settings
@@ -269,7 +270,12 @@ def add_device(user_id: str, device: DeviceCreate):
     Add a new smart device to the user account.
     """
     try:
-        res = facade.add_new_device(user_id, device.name, device.device_type)
+        res = facade.add_new_device(
+            user_id,
+            device.name,
+            device.device_type,
+            is_shiftable=device.is_shiftable,
+        )
         return {"status": "success", "data": res}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

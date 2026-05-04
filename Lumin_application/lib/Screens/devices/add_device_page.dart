@@ -75,6 +75,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
         final panelCapacity = (result['panel_capacity'] ?? '')
             .toString()
             .trim();
+        final isShiftable = result['is_shiftable'] == true;
 
         if (name.isEmpty || type.isEmpty) {
           _snack('Setup finished, but device info is missing.');
@@ -87,6 +88,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
           deviceName: name,
           deviceType: normalizedType,
           panelCapacity: panelCapacity.isEmpty ? null : panelCapacity,
+          isShiftable: normalizedType == 'consumption' ? isShiftable : false,
         );
 
         if (!mounted) return;
