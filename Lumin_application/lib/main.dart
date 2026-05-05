@@ -24,6 +24,8 @@ Future<void> main() async {
     );
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
     await FirebaseMessaging.instance.requestPermission();
+    final token = await FirebaseMessaging.instance.getToken();
+    print('FCM TOKEN: $token');
   }
 
   await Supabase.initialize(

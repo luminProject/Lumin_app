@@ -156,7 +156,6 @@ class ApiService {
   // ===== Bill =====
 
   /// GET /bill/{userId}
-
   Future<Map<String, dynamic>> getBill() async {
     final url = '$baseUrl/bill/$_userId';
 
@@ -216,18 +215,59 @@ class ApiService {
     }
   }
 
-  // ===== Solar =====
+  // ===== Statistics Chart (Sprint 2) =====
 
-  /// GET /solar-forecast/{userId}
-  Future<Map<String, dynamic>> getSolarForecast() async {
+  /// GET /stats/{userId}?range=week|month|year&anchor=...
+  ///
+  /// anchor format:
+  ///   week  → YYYY-MM-DD (any day within the target week)
+  ///   month → YYYY-MM
+  ///   year  → YYYY
+  Future<Map<String, dynamic>> getStats({
+    required String range,
+    required String anchor,
+  }) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/solar-forecast/$_userId'),
+      Uri.parse('$baseUrl/stats/$_userId?range=$range&anchor=$anchor'),
+      headers: authHeaders(),
     );
     if (response.statusCode == 200) {
       return json.decode(response.body)['data'];
     } else {
-      throw Exception('Failed to load solar forecast');
+      throw Exception('Failed to load stats: ${response.statusCode}');
     }
+  }
+
+  // ===== Solar Forecast (Sprint 2 — Solar Forecast feature) =====
+
+  /// GET /solar-forecast/{userId}
+  /// Returns the current forecast state for the user's solar system.
+  /// State machine cases: no_panels | collecting | collecting_extended |
+  ///                      forecast_available | feature_disabled
+  Future<Map<String, dynamic>> getSolarForecast() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/solar-forecast/$_userId'),
+      headers: authHeaders(),
+    );
+    if (response.statusCode == 200) {
+      return json.decode(response.body)['data'];
+    } else {
+      throw Exception('Failed to load solar forecast: ${response.statusCode}');
+    }
+  }
+
+  /// POST /solar-forecast/{userId}/check-device
+  /// Called from feature_disabled screen to check if device reconnected.
+  /// Returns: { reconnected: bool }
+  Future<Map<String, dynamic>> checkSolarDevice() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/solar-forecast/$_userId/check-device'),
+      headers: authHeaders(),
+    );
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Device check failed: ${response.statusCode}');
   }
 
   // ===== Recommendations =====
@@ -260,7 +300,6 @@ class ApiService {
     debugPrint('GET LATEST REC <- status=${response.statusCode}');
     if (response.statusCode == 200) {
       final body = json.decode(response.body) as Map<String, dynamic>;
-      // Returns null if no recommendation exists yet
       return body['data'] as Map<String, dynamic>?;
     } else {
       throw Exception('Failed to load latest recommendation: ${response.body}');
@@ -354,3 +393,4 @@ class ApiService {
     await updateProfile(userId, {'avatar_url': avatarUrl});
   }
 }
+

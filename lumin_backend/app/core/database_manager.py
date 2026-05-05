@@ -169,6 +169,38 @@ class DatabaseManager:
         return getattr(result, "data", None) or []
 
 
+# ── Sprint 2: Stats chart ──────────────────────────────────────
+    # Added for the Home screen statistics chart (Week/Month/Year).
+    # Fetches only the columns needed for chart rendering.
+    # Separate from get_current_cycle_energy_rows() to avoid coupling
+    # stats queries to the billing cycle logic.
+
+    def get_energy_rows_for_range(
+        self,
+        user_id: str,
+        start: DateType,
+        end: DateType,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch energycalculation rows for a user within an arbitrary date range.
+
+        Returns only: date, solar_production, total_consumption.
+        Used by StatsService to build the statistics chart.
+        """
+        result = (
+            self.supabase
+            .table("energycalculation")
+            .select("date, solar_production, total_consumption")
+            .eq("user_id", str(user_id))
+            .gte("date", start.isoformat())
+            .lte("date", end.isoformat())
+            .order("date", desc=False)
+            .execute()
+        )
+        return getattr(result, "data", None) or []
+    # ── End Sprint 2: Stats chart ──────────────────────────────────
+
+
     def get_users_with_energy(self) -> List[str]:
         """
         Get all users who have energy data.

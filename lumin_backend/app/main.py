@@ -18,7 +18,7 @@ Responsibilities:
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header 
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.Bill_scheduler import setup_scheduler, shutdown_scheduler
 from pydantic import BaseModel
@@ -32,7 +32,9 @@ from app.routers.recommendation_router import router as recommendation_router
 from app.core.lumin_facade import LuminFacade
 from app.scheduler import create_scheduler
 import supabase as supabase_
-
+from app.models.solar_forecast_service import SolarForecastService
+from app.models.stats_service import StatsService
+from app.tasks.device_monitor import DeviceMonitor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,8 +70,10 @@ supabase = supabase_.create_client(SUPABASE_URL, SUPABASE_KEY)
 # Facade instance (central system interface)
 facade = LuminFacade(supabase)
 # Admin facade for system jobs/schedulers
-admin_facade = LuminFacade(supabase_admin)
-
+admin_facade   = LuminFacade(supabase_admin)
+# Solar Forecast feature instances
+solar_service  = SolarForecastService(supabase)
+device_monitor = DeviceMonitor(supabase)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -247,6 +251,33 @@ def get_energy(user_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/stats/{user_id}")
+async def get_stats(
+    user_id:    str,
+    range_type: str = Query(..., alias="range"),
+    anchor:     str = Query(...),
+):
+    """
+    GET /stats/{user_id}?range=week|month|year&anchor=...
+
+    anchor format:
+      week  → YYYY-MM-DD  (any day within the target week)
+      month → YYYY-MM
+      year  → YYYY
+
+    Returns aggregated solar_production + total_consumption
+    for the requested period.
+    """
+    try:
+        service = StatsService(supabase)
+        data    = service.get_stats(user_id, range_type, anchor)
+        return {"status": "success", "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # -----------------------------
 # Device Management Endpoints
 # -----------------------------
@@ -386,19 +417,54 @@ def run_bill_checkpoint():
 # Solar Forecast Endpoint
 # -----------------------------
 @app.get("/solar-forecast/{user_id}")
-def get_solar_forecast(user_id: str):
-    """
-    Returns solar energy production prediction.
-    """
+async def solar_forecast(user_id: str, test_date: str = None):
     try:
+        # نشغل الـ monitor بشكل معزول — لو فشل ما يوقف الفوركاست
+        try:
+            device_monitor.check_user(user_id, test_date=test_date)
+        except Exception as monitor_err:
+            logger.warning(f"device_monitor error (non-fatal): {monitor_err}")
+        
+        state = solar_service.get_forecast_state(user_id, test_date=test_date)
+        return {"status": "success", "data": state}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/solar-forecast/{user_id}/check-device")
+def check_device_connection(user_id: str):
+    try:
+        state = solar_service.get_forecast_state(user_id)
         return {
             "status": "success",
-            "data": facade.get_solar_prediction(user_id)
+            "data": state,
+            "reconnected": state.get("case") != "feature_disabled",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# DEV ONLY — احذفي قبل production
+@app.post("/dev/trigger-monitor/{user_id}")
+def dev_trigger_monitor(user_id: str, test_date: str = None):
+    import io
+    log_stream = io.StringIO()
+    handler = logging.StreamHandler(log_stream)
+    logging.getLogger("device_monitor").addHandler(handler)
+    try:
+        device_monitor.check_user(user_id, test_date=test_date)
+        solar_service.get_forecast_state(user_id, test_date=test_date)
+        notifs = (
+            supabase.table("notification")
+            .select("notification_type, content, timestamp")
+            .eq("user_id", user_id)
+            .order("timestamp", desc=True)
+            .limit(5)
+            .execute()
+        ).data
+        return {"status": "ok", "notifications_sent": notifs, "log": log_stream.getvalue()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        logging.getLogger("device_monitor").removeHandler(handler)
 # -----------------------------
 # Recommendations Endpoint
 # -----------------------------

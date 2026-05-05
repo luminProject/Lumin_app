@@ -15,9 +15,9 @@ class HomeHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Hello Imran', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              Text('Hello Shahad', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               SizedBox(height: 2),
-              Text('Thursday, 06 August 2025', style: TextStyle(fontSize: 12, color: AppColors.sub)),
+              Text('Monday, 20 April 2026', style: TextStyle(fontSize: 12, color: AppColors.sub)),
             ],
           ),
         ),

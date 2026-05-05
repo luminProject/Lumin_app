@@ -732,23 +732,136 @@ class LuminFacade:
     # -----------------------------
     # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS 
     # -----------------------------
+    # -----------------------------
+    # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS
+    # -----------------------------
     def get_solar_prediction(self, user_id: str) -> Dict[str, Any]:
         """
-        يستخدم الـ SolarForecast و ForecastModel لجلب تنبؤات الطاقة الشمسية السنوية 
-        ومستوى الثقة (confidence level).
+        Solar Forecast — per updated class diagram (Change Log Section 3.3).
+
+        Case 1 — No solar panels (has_solar_panels = False or NULL):
+            Returns regional GHI estimate from the pre-built JSON
+            based on the user's nearest site (lat/lng from users table).
+            Includes estimated monthly production for a 5 kWp reference system.
+
+        Case 2/3 — Has solar panels (has_solar_panels = True):
+            Returns the personalized monthly GHI forecast for years 2026-2028,
+            stored in solar_forecast table (monthly_ghi_forecast JSONB).
+            If no stored forecast exists yet, falls back to regional estimate.
         """
-        res = (
-            supabase
-            .table("solar_forecast")
-            .select("predicted_production_kwh, confidence_level, forecast_year")
+        from app.models.xgboost_solar_model import XGBoostSolarModel
+        from app.models.solar_forecast import SolarForecast
+
+        # ── 1. Get user profile (location + solar panel status) ────────────────
+        user_res = (
+            self.supabase.table("users")
+            .select("has_solar_panels, latitude, longitude, location")
             .eq("user_id", user_id)
-            .order("forecast_year", desc=True)
             .limit(1)
             .execute()
         )
-        if res.data:
-            return res.data[0]
-        return {"message": "No solar prediction available for this user yet."}
+        if not user_res.data:
+            raise ValueError("User not found")
+
+        user = user_res.data[0]
+        has_panels = user.get("has_solar_panels") or False
+        lat = user.get("latitude")
+        lng = user.get("longitude")
+
+        # ── 2. Load XGBoost model (reads JSON once) ────────────────────────────
+        xgb_model = XGBoostSolarModel()
+        xgb_model.loadModel()
+        solar_forecast = SolarForecast(forecast_id=0, model=xgb_model)
+
+        # ── 3. Find nearest site from user coordinates ─────────────────────────
+        if lat is None or lng is None:
+            # Fallback: use Jeddah KAU coordinates if user has no location set
+            lat, lng = 21.4858, 39.1925
+
+        nearest_site = xgb_model.getNearestSite(lat, lng)
+        site_info    = xgb_model.getSiteInfo(nearest_site)
+
+        # ── CASE 1: No solar panels ────────────────────────────────────────────
+        if not has_panels:
+            # Return regional GHI + estimated production for 5 kWp reference system
+            # Formula: E (kWh/month) = GHI_daily (kWh/m²/day) × PR × P_nom × days
+            # PR = 0.78 (Al-Shalabi et al., 2024 — Saudi PR range 77%-84.27%)
+            # P_nom = 5.0 kWp (illustrative reference system, not a cited value)
+            # Reference: Dobos (2014) PVWatts Version 5 Manual, NREL/TP-6A20-62641
+
+            PR     = 0.78
+            P_NOM  = 5.0   # kWp — illustrative only
+            DAYS   = 30
+
+            monthly_ghi_2026 = {}
+            monthly_production_kwh = {}
+
+            for month in range(1, 13):
+                ghi_daily = xgb_model.predict(nearest_site, month, 2026)  # Wh/m²/day
+                ghi_kwh   = ghi_daily / 1000                              # kWh/m²/day
+                monthly_ghi_2026[str(month)]        = round(ghi_daily, 1)
+                monthly_production_kwh[str(month)]  = round(ghi_kwh * PR * P_NOM * DAYS, 1)
+
+            annual_avg_ghi = xgb_model.getAnnualAvgGhi(nearest_site, 2026)
+
+            return {
+                "case": "no_panels",
+                "nearest_site": nearest_site,
+                "cluster": site_info.get("cluster"),
+                "annual_avg_ghi_wh_m2_day": annual_avg_ghi,
+                "monthly_ghi_2026": monthly_ghi_2026,
+                "estimated_monthly_production_kwh": monthly_production_kwh,
+                "reference_system_kwp": P_NOM,
+                "performance_ratio": PR,
+                "note": "Production estimate uses a 5 kWp illustrative system. Actual output depends on installed capacity and site conditions.",
+            }
+
+        # ── CASE 2/3: Has solar panels ─────────────────────────────────────────
+        # Try to return stored personalized forecast from solar_forecast table
+        stored_res = (
+            self.supabase.table("solar_forecast")
+            .select("forecast_id, season, monthly_ghi_forecast, bias_corrected, is_personalized")
+            .eq("user_id", user_id)
+            .eq("is_personalized", True)
+            .order("forecast_id", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if stored_res.data:
+            row = stored_res.data[0]
+            return {
+                "case": "has_panels_with_forecast",
+                "nearest_site": nearest_site,
+                "cluster": site_info.get("cluster"),
+                "season": row.get("season"),
+                "monthly_ghi_forecast": row.get("monthly_ghi_forecast"),
+                "bias_corrected": row.get("bias_corrected"),
+                "is_personalized": True,
+            }
+
+        # No stored forecast yet — return full 2026-2028 forecast from JSON
+        forecast_2026 = solar_forecast.getForecastForSite(nearest_site, 2026)
+        forecast_2027 = solar_forecast.getForecastForSite(nearest_site, 2027)
+        forecast_2028 = solar_forecast.getForecastForSite(nearest_site, 2028)
+
+        return {
+            "case": "has_panels_no_stored_forecast",
+            "nearest_site": nearest_site,
+            "cluster": site_info.get("cluster"),
+            "bias_corrected": True,
+            "is_personalized": False,
+            "forecast": {
+                "2026": {str(m): v for m, v in enumerate(forecast_2026, 1)},
+                "2027": {str(m): v for m, v in enumerate(forecast_2027, 1)},
+                "2028": {str(m): v for m, v in enumerate(forecast_2028, 1)},
+            },
+            "annual_avg_ghi": {
+                "2026": xgb_model.getAnnualAvgGhi(nearest_site, 2026),
+                "2027": xgb_model.getAnnualAvgGhi(nearest_site, 2027),
+                "2028": xgb_model.getAnnualAvgGhi(nearest_site, 2028),
+            },
+        }
 
     def view_recommendations(self, user_id: str) -> List[Dict[str, Any]]:
         """

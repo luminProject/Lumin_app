@@ -11,6 +11,10 @@ For Grid-only users:
   - Monday 4:00 PM Saudi time → General recommendation
   - Thursday 8:00 PM Saudi time → General recommendation
 
+Also runs Solar Forecast jobs daily (added by Solar Forecast feature):
+  - 8:00 AM Saudi time (05:00 UTC) → Device Monitor (check offline devices)
+  - 8:05 AM Saudi time (05:05 UTC) → Solar Forecast Check (sends forecast_ready if ready)
+
 Saudi time = UTC+3
 APScheduler day_of_week values: mon, tue, wed, thu, fri, sat, sun
 """
@@ -24,8 +28,52 @@ from apscheduler.triggers.cron import CronTrigger
 from app.supabase_client import supabase_admin
 from app.core.lumin_facade import LuminFacade
 from app.models.recommendation import Recommendation
-
+from app.tasks.device_monitor import DeviceMonitor  # added by Solar Forecast feature
+from app.models.solar_forecast_service import SolarForecastService
 logger = logging.getLogger(__name__)
+
+
+# ─── Device Monitor Job (added by Solar Forecast feature) ────
+# Runs daily to check all production devices for missing data.
+# Sends device_warning or feature_disabled notifications as needed.
+
+async def run_device_monitor():
+    """8:00 AM Saudi → check all production devices for missing data."""
+    logger.info("Scheduler: Starting daily device monitor job...")
+    try:
+        monitor = DeviceMonitor(supabase_admin)
+        monitor.run()
+        logger.info("Scheduler: Device monitor job complete.")
+    except Exception as e:
+        logger.error(f"Scheduler: Device monitor job failed — {e}")
+
+
+# ─── Solar Forecast Check Job (added by Solar Forecast feature) ──
+# Runs daily to evaluate forecast state for all users.
+# Sends forecast_ready notification if previous season data is complete.
+# This ensures users receive the notification even without opening the app.
+
+async def run_solar_forecast_check():
+    """8:05 AM Saudi → check forecast state for all users.
+    Sends forecast_ready notification if previous season is complete."""
+    logger.info("Scheduler: Starting solar forecast check job...")
+    try:
+        from app.services.solar_forecast_service import SolarForecastService
+        solar_svc = SolarForecastService(supabase_admin)
+        response  = supabase_admin.table("users").select("user_id").execute()
+
+        for user in (response.data or []):
+            user_id = user.get("user_id")
+            if not user_id:
+                continue
+            try:
+                solar_svc.get_forecast_state(user_id)
+            except Exception as e:
+                logger.error(f"Scheduler: Forecast check failed for {user_id}: {e}")
+
+        logger.info("Scheduler: Solar forecast check complete.")
+    except Exception as e:
+        logger.error(f"Scheduler: Solar forecast check job failed — {e}")
 
 
 # ─── Helpers ─────────────────────────────────────────────────
@@ -59,15 +107,14 @@ async def _send_to_users(user_filter: str, recommendation_type: str):
 
         facade = LuminFacade(supabase_admin)
         success_count = 0
-        skip_count = 0
-        error_count = 0
+        skip_count    = 0
+        error_count   = 0
 
         for user in users:
             user_id = user.get("user_id")
             if not user_id:
                 continue
 
-            # Filter by user type
             user_has_solar = Recommendation.userHasSolar(user)
 
             if user_filter == "solar" and not user_has_solar:
@@ -102,8 +149,6 @@ async def _send_to_users(user_filter: str, recommendation_type: str):
 
 # ─── Jobs ────────────────────────────────────────────────────
 
-# === Solar users ===
-
 async def solar_users_custom_recommendation():
     """Saturday 3:00 PM Saudi → custom solar recommendation."""
     await _send_to_users(user_filter="solar", recommendation_type="solar")
@@ -113,8 +158,6 @@ async def solar_users_general_recommendation():
     """Tuesday 7:00 PM Saudi → general tip for solar users."""
     await _send_to_users(user_filter="solar", recommendation_type="general")
 
-
-# === Grid-only users ===
 
 async def grid_users_general_recommendation_1():
     """Monday 4:00 PM Saudi → general tip for grid-only users."""
@@ -138,7 +181,24 @@ def create_scheduler() -> AsyncIOScheduler:
     """
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    # ─── Solar users ───
+    # 8:00 AM Saudi = 05:00 UTC → Device Monitor (Solar Forecast feature)
+    scheduler.add_job(
+        run_device_monitor,
+        trigger=CronTrigger(hour=5, minute=0),
+        id="device_monitor_8am",
+        name="Device Monitor at 8:00 AM Saudi",
+        replace_existing=True,
+    )
+
+    # 8:05 AM Saudi = 05:05 UTC → Solar Forecast Check (Solar Forecast feature)
+    scheduler.add_job(
+        run_solar_forecast_check,
+        trigger=CronTrigger(hour=5, minute=5),
+        id="solar_forecast_check_8am",
+        name="Solar Forecast Check at 8:05 AM Saudi",
+        replace_existing=True,
+    )
+
     # Saturday 3 PM Saudi → custom solar recommendation
     scheduler.add_job(
         solar_users_custom_recommendation,
@@ -157,7 +217,6 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # ─── Grid-only users ───
     # Monday 4 PM Saudi → general tip for grid-only users
     scheduler.add_job(
         grid_users_general_recommendation_1,
