@@ -169,6 +169,58 @@ async def grid_users_general_recommendation_2():
     await _send_to_users(user_filter="grid_only", recommendation_type="general")
 
 
+# ─── Daily Reset Job ─────────────────────────────────────────
+
+async def reset_daily_energy():
+    """
+    12:00 AM Saudi (21:00 UTC previous day) → reset total_energy_daily
+    for ALL devices to 0.
+    Called once per day at midnight Saudi time.
+    """
+    logger.info("Scheduler: Resetting total_energy_daily for all devices...")
+    try:
+        facade = LuminFacade(supabase_admin)
+        facade.resetDailyEnergy()
+        logger.info("Scheduler: total_energy_daily reset complete.")
+    except Exception as e:
+        logger.error(f"Scheduler: Daily reset failed — {e}")
+
+
+# ─── Energy Calculation Job ───────────────────────────────────
+
+async def update_energy_calculation():
+    """
+    Every minute → sum total_energy_daily per user from device table,
+    then UPSERT into energycalculation (one row per user per day).
+    Used by bill prediction and statistics features.
+    """
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from app.core.database_manager import DatabaseManager
+
+    logger.info("Scheduler: Updating energycalculation...")
+    try:
+        db = DatabaseManager(supabase_admin)
+        today = datetime.now(ZoneInfo("Asia/Riyadh")).date().isoformat()
+
+        user_ids = db.get_all_user_ids()
+        for user_id in user_ids:
+            try:
+                totals = db.get_user_daily_energy_totals(user_id)
+                db.upsert_energy_calculation(
+                    user_id=user_id,
+                    date_str=today,
+                    total_consumption=totals["total_consumption"],
+                    solar_production=totals["solar_production"],
+                )
+            except Exception as e:
+                logger.error(f"Scheduler: Energy calc failed for {user_id}: {e}")
+
+        logger.info(f"Scheduler: energycalculation updated for {len(user_ids)} users.")
+    except Exception as e:
+        logger.error(f"Scheduler: Energy calculation job failed — {e}")
+
+
 # ─── Scheduler Instance ──────────────────────────────────────
 
 def create_scheduler() -> AsyncIOScheduler:
@@ -232,6 +284,24 @@ def create_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(day_of_week="thu", hour=17, minute=0),
         id="grid_general_thursday_8pm",
         name="Grid-only users — general tip (Thursday 8 PM Saudi)",
+        replace_existing=True,
+    )
+
+    # 12:00 AM Saudi = 21:00 UTC (previous day) → Reset total_energy_daily
+    scheduler.add_job(
+        reset_daily_energy,
+        trigger=CronTrigger(hour=21, minute=0),
+        id="reset_daily_energy_midnight",
+        name="Reset total_energy_daily at midnight Saudi",
+        replace_existing=True,
+    )
+
+    # Every minute → UPSERT energycalculation from device.total_energy_daily
+    scheduler.add_job(
+        update_energy_calculation,
+        trigger=CronTrigger(minute="*"),
+        id="update_energy_calculation_every_minute",
+        name="Update energycalculation every minute",
         replace_existing=True,
     )
 

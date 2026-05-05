@@ -3,26 +3,33 @@ import '../../theme/app_colors.dart';
 import 'glass_card.dart';
 
 class SolarImpactRow extends StatelessWidget {
-  const SolarImpactRow({super.key});
+  final String moneySaved;
+  final String carbonReduction;
+
+  const SolarImpactRow({
+    super.key,
+    this.moneySaved = '— ﷼',
+    this.carbonReduction = '— kg',
+  });
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    return Row(
       children: [
         Expanded(
           child: _ImpactCard(
             title: 'Money Saved',
-            value: '﷼ 18.50',
+            value: moneySaved,
             sub: 'Saved so far',
             icon: Icons.savings,
             accent: AppColors.cyan,
           ),
         ),
-        SizedBox(width: 12),
+        const SizedBox(width: 12),
         Expanded(
           child: _ImpactCard(
             title: 'Carbon Reduction',
-            value: '24.6 kg',
+            value: carbonReduction,
             sub: 'CO₂ saved so far',
             icon: Icons.eco,
             accent: AppColors.mint,

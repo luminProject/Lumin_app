@@ -359,6 +359,23 @@ class ApiService {
     }
   }
 
+  // ===== Real-Time Monitoring =====
+
+  /// GET /realtime/{userId}
+  /// Returns live device readings for the Home page.
+  /// Called every 5 seconds by a Timer in HomePage.
+  Future<Map<String, dynamic>> getRealtimeData() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/realtime/$_userId'),
+    );
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      return body['data'] as Map<String, dynamic>? ?? {};
+    } else {
+      throw Exception('Failed to load realtime data: ${response.statusCode}');
+    }
+  }
+
   // ===== Profile =====
 
   /// GET /profiles/{userId}
@@ -393,4 +410,3 @@ class ApiService {
     await updateProfile(userId, {'avatar_url': avatarUrl});
   }
 }
-

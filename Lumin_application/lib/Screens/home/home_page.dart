@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../recommendations/recommendations_page.dart';
 
 import '../../Widgets/gradient_background.dart';
@@ -11,6 +13,7 @@ import '../../Widgets/home/devices_section.dart';
 import '../../Widgets/home/recommendations_preview.dart';
 import '../../Widgets/home/stats_card.dart';
 import '../../Widgets/home/bottom_nav.dart';
+import '../../services/api_service.dart';
 
 import '../devices/device_management_page.dart';
 
@@ -23,10 +26,89 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
 
+  // ─── Real-Time State ──────────────────────────────────────
+  final _api = ApiService();
+  Timer? _realtimeTimer;
+
+  // HeroHouse
+  String _solarText       = '— kWh';
+  String _consumptionText = '— kWh';
+  String _gridText        = '— kWh';
+
+  // Solar Impact (from energycalculation — updates every minute)
+  String _moneySaved      = '— ﷼';
+  String _carbonReduction = '— kg';
+
   @override
   void initState() {
     super.initState();
     _setupFCMListeners();
+    _fetchAll();
+    _realtimeTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _fetchAll(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _realtimeTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchAll() async {
+    await Future.wait([
+      _fetchRealtimeData(),
+      _fetchSolarImpact(),
+    ]);
+  }
+
+  // ─── Real-Time (device table) ─────────────────────────────
+  Future<void> _fetchRealtimeData() async {
+    try {
+      final data = await _api.getRealtimeData();
+      if (!mounted) return;
+      setState(() {
+        _solarText       = _fmtKwh(data['solar_production_kwh']);
+        _consumptionText = _fmtKwh(data['total_consumption_kwh']);
+        _gridText        = _fmtKwh(data['grid_kwh']);
+      });
+    } catch (_) {}
+  }
+
+  // ─── Solar Impact (energycalculation) ────────────────────
+  Future<void> _fetchSolarImpact() async {
+    try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final res = await Supabase.instance.client
+          .from('energycalculation')
+          .select('cost_savings, carbon_reduction')
+          .eq('user_id', userId)
+          .eq('date', DateTime.now().toIso8601String().substring(0, 10))
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted || res == null) return;
+
+      final savings  = (res['cost_savings']  as num?)?.toDouble() ?? 0.0;
+      final carbon   = (res['carbon_reduction'] as num?)?.toDouble() ?? 0.0;
+
+      setState(() {
+        _moneySaved      = '﷼ ${savings.toStringAsFixed(2)}';
+        _carbonReduction = '${carbon.toStringAsFixed(2)} kg';
+      });
+    } catch (_) {}
+  }
+
+  // ─── Helpers ─────────────────────────────────────────────
+  String _fmtKwh(dynamic v) {
+    if (v == null) return '— kWh';
+    final kwh = (v as num).toDouble();
+    if (kwh < 0.001) return '0.00 kWh';
+    if (kwh < 1.0) return '${(kwh * 1000).toStringAsFixed(1)} Wh';
+    return '${kwh.toStringAsFixed(3)} kWh';
   }
 
   void _setupFCMListeners() {
@@ -130,7 +212,11 @@ class _HomePageState extends State<HomePage> {
               const HomeHeader(),
               const SizedBox(height: 12),
 
-              const HeroHouse(),
+              HeroHouse(
+                solarProductionText: _solarText,
+                totalConsumptionText: _consumptionText,
+                gridText: _gridText,
+              ),
               const SizedBox(height: 14),
 
               const Text(
@@ -139,7 +225,10 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 10),
 
-              const SolarImpactRow(),
+              SolarImpactRow(
+                moneySaved: _moneySaved,
+                carbonReduction: _carbonReduction,
+              ),
               const SizedBox(height: 16),
 
               DevicesSection(

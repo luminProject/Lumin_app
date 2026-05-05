@@ -480,3 +480,50 @@ def get_recommendations(user_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------
+# Real-Time Endpoints
+# -----------------------------
+
+class RealtimeReadingIn(BaseModel):
+    """
+    Payload sent by sensor_simulator.py / sensor_uploader.py
+    for each device reading.
+    """
+    device_id:    int
+    watts:        float
+    reading_time: datetime | None = None
+
+
+@app.post("/realtime-reading")
+def ingest_realtime_reading(payload: RealtimeReadingIn):
+    """
+    Receives a live watt reading for one device.
+    Updates device table (consumption/production, totals, is_on).
+    """
+    try:
+        reading_time_iso = (
+            payload.reading_time or datetime.utcnow()
+        ).isoformat()
+
+        return facade.ingestRealtimeReading(
+            device_id=payload.device_id,
+            watts=float(payload.watts),
+            reading_time_iso=reading_time_iso,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/realtime/{user_id}")
+def get_realtime_data(user_id: str):
+    """
+    Returns live device readings for the Home page.
+    Includes solar production, total consumption, grid usage,
+    and per-device status.
+    """
+    try:
+        return facade.getRealtimeData(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -3,7 +3,16 @@ import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 
 class HeroHouse extends StatelessWidget {
-  const HeroHouse({super.key});
+  final String solarProductionText;
+  final String totalConsumptionText;
+  final String gridText;
+
+  const HeroHouse({
+    super.key,
+    this.solarProductionText = '— kW',
+    this.totalConsumptionText = '— kW',
+    this.gridText = '— kW',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +68,7 @@ class HeroHouse extends StatelessWidget {
                   child: _GlowCallout(
                     width: calloutW,
                     title: 'Solar Production',
-                    value: '4.28 kW',
+                    value: solarProductionText,
                     icon: Icons.solar_power,
                     glow: AppColors.lime,
                   ),
@@ -70,7 +79,7 @@ class HeroHouse extends StatelessWidget {
                   child: _GlowCallout(
                     width: calloutW,
                     title: 'Grid',
-                    value: '4.28 kW',
+                    value: gridText,
                     icon: Icons.electrical_services,
                     glow: AppColors.cyan,
                   ),
@@ -81,7 +90,7 @@ class HeroHouse extends StatelessWidget {
                   child: _GlowCallout(
                     width: calloutW,
                     title: 'Total Consumption',
-                    value: '4.28 kW',
+                    value: totalConsumptionText,
                     icon: Icons.show_chart,
                     glow: AppColors.mint,
                   ),

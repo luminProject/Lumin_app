@@ -12,6 +12,7 @@ from app.models.recommendation import Recommendation
 from app.core.database_manager import DatabaseManager
 from app.core.fcm_service import FCMService
 from app.core.device_factory import DeviceFactory
+from app.models.realtime_reading import RealtimeReading, RealtimeSummary
 
 class LuminFacade:
     """
@@ -1179,6 +1180,80 @@ class LuminFacade:
             "message": "Device information fetched successfully.",
             "data": info_list,
         }
+
+    # -----------------------------
+    # -----------------------------
+    # REAL-TIME MONITORING
+    # Pattern: Facade → Model → DatabaseManager
+    # -----------------------------
+
+    def ingestRealtimeReading(
+        self,
+        device_id: int,
+        watts: float,
+        reading_time_iso: str,
+    ) -> Dict[str, Any]:
+        """
+        Process one live sensor reading.
+        Coordinates between RealtimeReading model and DatabaseManager.
+        """
+        # 1) Get current device row from DB
+        device = self.db.get_device_row(device_id)
+        if not device:
+            return {"success": False, "message": f"Device {device_id} not found."}
+
+        # 2) Build Model — loads state from device row
+        reading = RealtimeReading.fromDeviceRow(
+            device_row=device,
+            watts=watts,
+            reading_time_iso=reading_time_iso,
+        )
+
+        # 3) Model does all calculations
+        reading.process()
+
+        # 4) Persist via DatabaseManager
+        self.db.update_device_realtime(device_id, reading.build_db_payload())
+
+        # 5) Return response
+        return reading.to_response_dict()
+
+    def getRealtimeData(self, user_id: str) -> Dict[str, Any]:
+        """
+        Returns cumulative daily energy totals for all user devices.
+        Used by the Home page to show:
+          - solar_production_kwh  → total_energy_daily of production devices
+          - total_consumption_kwh → total_energy_daily of consumption devices
+          - grid_kwh              → max(0, consumption - solar)
+          - instant_watts         → current live watts per device (for is_on status)
+        """
+        rows = self.db.get_user_devices_realtime(user_id)
+
+        if not rows:
+            return {
+                "success": True,
+                "status":  "empty",
+                "code":    "NO_DEVICES",
+                "message": "No devices found for this user.",
+                "data": {
+                    "solar_production_kwh":  0.0,
+                    "total_consumption_kwh": 0.0,
+                    "grid_kwh":              0.0,
+                    "devices":               [],
+                },
+            }
+
+        # Use Model for aggregation
+        summary = RealtimeSummary(rows)
+        summary.compute()
+
+        return summary.to_response_dict()
+
+    def resetDailyEnergy(self) -> None:
+        """Reset total_energy_daily for all devices. Called at midnight."""
+        self.db.reset_all_daily_energy()
+
+
 class ProfileValidationError(Exception):
     """Raised when profile input is invalid"""
     pass

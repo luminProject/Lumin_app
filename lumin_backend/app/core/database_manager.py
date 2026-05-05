@@ -517,3 +517,155 @@ class DatabaseManager:
         )
         data = response.data or []
         return data[0] if data else None
+    # =========================================================
+    # REAL-TIME DEVICE UPDATE (new)
+    # ---------------------------------------------------------
+    # Updates the device table columns directly on every sensor
+    # reading. No new rows — just UPDATE existing device row.
+    # =========================================================
+
+    def get_device_row(self, device_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single device row by device_id."""
+        response = (
+            self.supabase.table("device")
+            .select("device_id, device_type, consumption, production, total_energy, total_energy_daily, last_reading_at, is_on")
+            .eq("device_id", device_id)
+            .limit(1)
+            .execute()
+        )
+        data = response.data or []
+        return data[0] if data else None
+
+    def update_device_realtime(
+        self,
+        device_id: int,
+        payload: Dict[str, Any],
+    ) -> None:
+        """
+        UPDATE the device row with new real-time values.
+        Called on every sensor reading.
+        Payload contains: consumption/production, is_on,
+        total_energy_daily, total_energy, last_reading_at
+        """
+        self.supabase.table("device").update(payload).eq("device_id", device_id).execute()
+
+    def reset_all_daily_energy(self) -> None:
+        """
+        Reset total_energy_daily to 0 for ALL devices.
+        Called by the midnight scheduler job every day.
+        """
+        self.supabase.table("device").update({"total_energy_daily": 0}).neq("device_id", 0).execute()
+
+    def get_user_devices_realtime(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Returns all devices for a user with their live readings.
+        Used by GET /realtime/{user_id}.
+        """
+        response = (
+            self.supabase.table("device")
+            .select("device_id, device_name, device_type, consumption, production, is_on, total_energy_daily, total_energy, last_reading_at")
+            .eq("user_id", user_id)
+            .order("device_id")
+            .execute()
+        )
+        return response.data or []
+    # =========================================================
+    # ENERGY CALCULATION — Daily UPSERT (new)
+    # ---------------------------------------------------------
+    # Called every minute by the scheduler.
+    # Reads total_energy_daily from device table for each user,
+    # then UPSERT into energycalculation (one row per user per day).
+    # =========================================================
+
+    def get_all_user_ids(self) -> List[str]:
+        """Get all distinct user_ids from the device table."""
+        try:
+            response = self.supabase.table("device").select("user_id").execute()
+            rows = response.data or []
+            return list(set(str(r["user_id"]) for r in rows if r.get("user_id")))
+        except Exception:
+            return []
+
+    def get_user_daily_energy_totals(self, user_id: str) -> Dict[str, float]:
+        """
+        Sum total_energy_daily for all devices of a user.
+        Returns: { "total_consumption": float, "solar_production": float }
+        """
+        try:
+            response = (
+                self.supabase.table("device")
+                .select("device_type, total_energy_daily")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            rows = response.data or []
+
+            total_consumption = 0.0
+            solar_production  = 0.0
+
+            for row in rows:
+                kwh = float(row.get("total_energy_daily") or 0.0)
+                if row.get("device_type") == "production":
+                    solar_production += kwh
+                else:
+                    total_consumption += kwh
+
+            return {
+                "total_consumption": round(total_consumption, 6),
+                "solar_production":  round(solar_production, 6),
+            }
+        except Exception:
+            return {"total_consumption": 0.0, "solar_production": 0.0}
+
+    def upsert_energy_calculation(
+        self,
+        user_id: str,
+        date_str: str,
+        total_consumption: float,
+        solar_production: float,
+    ) -> None:
+        """
+        UPSERT into energycalculation.
+        Uses manual check: if row exists → UPDATE, else → INSERT.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            payload = {
+                "user_id":           user_id,
+                "date":              date_str,
+                "total_consumption": total_consumption,
+                "solar_production":  solar_production,
+                "total_cost":        round(total_consumption * 0.18, 4),
+                "carbon_reduction":  round(solar_production * 0.568, 6),
+                "cost_savings":      round(solar_production * 0.18, 4),
+            }
+
+            # Check if row exists for this user + date
+            existing = (
+                self.supabase.table("energycalculation")
+                .select("calculation_id")
+                .eq("user_id", user_id)
+                .eq("date", date_str)
+                .limit(1)
+                .execute()
+            )
+            rows = existing.data or []
+
+            if rows:
+                # UPDATE existing row
+                calc_id = rows[0]["calculation_id"]
+                self.supabase.table("energycalculation").update({
+                    "total_consumption": total_consumption,
+                    "solar_production":  solar_production,
+                    "total_cost":        round(total_consumption * 0.18, 4),
+                    "carbon_reduction":  round(solar_production * 0.568, 6),
+                    "cost_savings":      round(solar_production * 0.18, 4),
+                }).eq("calculation_id", calc_id).execute()
+            else:
+                # INSERT new row
+                self.supabase.table("energycalculation").insert(payload).execute()
+
+        except Exception as e:
+            logging.getLogger(__name__).error(f"upsert_energy_calculation failed for {user_id}: {e}")
