@@ -158,6 +158,8 @@ class DeviceCreate(BaseModel):
     """
     name: str
     device_type: str
+    panel_capacity: float | None = None
+    room: str | None = None
     is_shiftable: bool = False
 
 
@@ -305,6 +307,8 @@ def add_device(user_id: str, device: DeviceCreate):
             user_id,
             device.name,
             device.device_type,
+            panel_capacity=device.panel_capacity,
+            room=device.room,
             is_shiftable=device.is_shiftable,
         )
         return {"status": "success", "data": res}

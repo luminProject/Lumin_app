@@ -75,6 +75,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
         final panelCapacity = (result['panel_capacity'] ?? '')
             .toString()
             .trim();
+        final room = (result['room'] ?? '').toString().trim();
         final isShiftable = result['is_shiftable'] == true;
 
         if (name.isEmpty || type.isEmpty) {
@@ -88,6 +89,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
           deviceName: name,
           deviceType: normalizedType,
           panelCapacity: panelCapacity.isEmpty ? null : panelCapacity,
+          room: room.isEmpty ? null : room,
           isShiftable: normalizedType == 'consumption' ? isShiftable : false,
         );
 

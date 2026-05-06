@@ -25,18 +25,17 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-
   // ─── Real-Time State ──────────────────────────────────────
   final _api = ApiService();
   Timer? _realtimeTimer;
 
   // HeroHouse
-  String _solarText       = '— kWh';
+  String _solarText = '— kWh';
   String _consumptionText = '— kWh';
-  String _gridText        = '— kWh';
+  String _gridText = '— kWh';
 
-  // Solar Impact (from energycalculation — updates every minute)
-  String _moneySaved      = '— ﷼';
+  // Solar Impact
+  String _moneySaved = '— ﷼';
   String _carbonReduction = '— kg';
 
   @override
@@ -57,26 +56,49 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _fetchAll() async {
-    await Future.wait([
-      _fetchRealtimeData(),
-      _fetchSolarImpact(),
-    ]);
+    await Future.wait([_fetchRealtimeData(), _fetchSolarImpact()]);
   }
 
   // ─── Real-Time (device table) ─────────────────────────────
   Future<void> _fetchRealtimeData() async {
     try {
-      final data = await _api.getRealtimeData();
+      double solarProduction = 0.0;
+      double totalConsumption = 0.0;
+
+      // Calculate the Home values directly from the user's actual devices.
+      // This keeps Solar Impact in sync with the device cards shown on Home.
+      final devices = await _api.getDevices();
+      for (final rawDevice in devices) {
+        if (rawDevice is! Map) continue;
+        final device = Map<String, dynamic>.from(rawDevice);
+        final type = (device['device_type'] ?? '').toString().toLowerCase();
+
+        if (type == 'production') {
+          solarProduction += _toDouble(device['production']);
+        } else if (type == 'consumption') {
+          totalConsumption += _toDouble(device['consumption']);
+        }
+      }
+
+      final gridKwh = totalConsumption > solarProduction
+          ? totalConsumption - solarProduction
+          : 0.0;
+      final solarUsed = solarProduction < totalConsumption
+          ? solarProduction
+          : totalConsumption;
+      final moneySaved = solarUsed * 0.18;
+
       if (!mounted) return;
       setState(() {
-        _solarText       = _fmtKwh(data['solar_production_kwh']);
-        _consumptionText = _fmtKwh(data['total_consumption_kwh']);
-        _gridText        = _fmtKwh(data['grid_kwh']);
+        _solarText = _fmtKwh(solarProduction);
+        _consumptionText = _fmtKwh(totalConsumption);
+        _gridText = _fmtKwh(gridKwh);
+        _moneySaved = '﷼ ${moneySaved.toStringAsFixed(2)}';
       });
     } catch (_) {}
   }
 
-  // ─── Solar Impact (energycalculation) ────────────────────
+  // ─── Solar Impact ─────────────────────────────────────────
   Future<void> _fetchSolarImpact() async {
     try {
       final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -84,7 +106,7 @@ class _HomePageState extends State<HomePage> {
 
       final res = await Supabase.instance.client
           .from('energycalculation')
-          .select('cost_savings, carbon_reduction')
+          .select('carbon_reduction')
           .eq('user_id', userId)
           .eq('date', DateTime.now().toIso8601String().substring(0, 10))
           .limit(1)
@@ -92,20 +114,24 @@ class _HomePageState extends State<HomePage> {
 
       if (!mounted || res == null) return;
 
-      final savings  = (res['cost_savings']  as num?)?.toDouble() ?? 0.0;
-      final carbon   = (res['carbon_reduction'] as num?)?.toDouble() ?? 0.0;
+      final carbon = (res['carbon_reduction'] as num?)?.toDouble() ?? 0.0;
 
       setState(() {
-        _moneySaved      = '﷼ ${savings.toStringAsFixed(2)}';
         _carbonReduction = '${carbon.toStringAsFixed(2)} kg';
       });
     } catch (_) {}
   }
 
+  double _toDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
+  }
+
   // ─── Helpers ─────────────────────────────────────────────
   String _fmtKwh(dynamic v) {
     if (v == null) return '— kWh';
-    final kwh = (v as num).toDouble();
+    final kwh = _toDouble(v);
     if (kwh < 0.001) return '0.00 kWh';
     if (kwh < 1.0) return '${(kwh * 1000).toStringAsFixed(1)} Wh';
     return '${kwh.toStringAsFixed(3)} kWh';
@@ -170,7 +196,10 @@ class _HomePageState extends State<HomePage> {
       reverseTransitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (_, __, ___) => page,
       transitionsBuilder: (_, animation, __, child) {
-        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
 
         final offsetTween = Tween<Offset>(
           begin: const Offset(0.06, 0.0),
@@ -181,10 +210,7 @@ class _HomePageState extends State<HomePage> {
 
         return FadeTransition(
           opacity: fadeTween,
-          child: SlideTransition(
-            position: offsetTween,
-            child: child,
-          ),
+          child: SlideTransition(position: offsetTween, child: child),
         );
       },
     );
@@ -234,9 +260,9 @@ class _HomePageState extends State<HomePage> {
               DevicesSection(
                 height: devicesHeight,
                 onSeeAll: () {
-                  Navigator.of(context).push(
-                    _niceRoute(const DeviceManagementPage()),
-                  );
+                  Navigator.of(
+                    context,
+                  ).push(_niceRoute(const DeviceManagementPage()));
                 },
               ),
               const SizedBox(height: 16),
@@ -244,7 +270,9 @@ class _HomePageState extends State<HomePage> {
               // ✅ Smart Recommendations (Preview) — مكانها الطبيعي قبل الإحصائيات
               RecommendationsPreview(
                 onSeeAll: () {
-                  Navigator.of(context).push(_niceRoute(const RecommendationsPage()));
+                  Navigator.of(
+                    context,
+                  ).push(_niceRoute(const RecommendationsPage()));
                 },
               ),
 

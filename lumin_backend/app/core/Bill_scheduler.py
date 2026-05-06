@@ -26,16 +26,6 @@ def setup_scheduler(facade: LuminFacade) -> None:
         replace_existing=True,
     )
 
-    scheduler.add_job(
-        lambda: facade.reset_monthly_total_energy(),
-        trigger="cron",
-        day=1,
-        hour=0,
-        minute=0,
-        id="monthly_total_energy_reset_job",
-        replace_existing=True,
-    )
-
     scheduler.start()
     print("✅ Bill Scheduler Started")
 

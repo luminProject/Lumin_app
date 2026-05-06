@@ -270,7 +270,7 @@ class LuminFacade:
     # -----------------------------
     # DEVICE MANAGEMENT (DeviceFactory & Device Classes)
     # -----------------------------
-    def add_new_device(self, user_id: str, name: str, device_type: str, panel_capacity: float | None = None, is_shiftable: bool = False) -> Dict[str, Any]:
+    def add_new_device(self, user_id: str, name: str, device_type: str, panel_capacity: float | None = None, room: str | None = None, is_shiftable: bool = False) -> Dict[str, Any]:
         """
         إضافة جهاز جديد (سواء كان جهاز استهلاك ConsumptionDevice أو إنتاج ProductionDevice)
         """
@@ -282,6 +282,7 @@ class LuminFacade:
                 "device_name": name,
                 "device_type": device_type,  # e.g., 'consumption' or 'production'
                 "panel_capacity": panel_capacity,
+                "room": room if device_type == "consumption" else None,
                 "is_shiftable": is_shiftable if device_type == "consumption" else False,
             })
             .execute()
@@ -423,9 +424,12 @@ class LuminFacade:
         cycle_end = cycle_start + timedelta(days=29)
 
         # If current stored date is old, move cycle forward.
+        # When the bill cycle moves forward, reset device total_energy for the same user
+        # so device totals and bill prediction start from the same cycle.
         while today > cycle_end:
             last_end = cycle_end
             self.db.update_user_last_billing_end_date(user_id, last_end)
+            self.reset_total_energy_for_user(user_id)
 
             cycle_start = last_end + timedelta(days=1)
             cycle_end = cycle_start + timedelta(days=29)
@@ -709,24 +713,25 @@ class LuminFacade:
    
 
     # -----------------------------
-    # MONTHLY TOTAL ENERGY RESET
+    # BILL CYCLE TOTAL ENERGY RESET
     # -----------------------------
-    def reset_monthly_total_energy(self) -> Dict[str, Any]:
+    def reset_total_energy_for_user(self, user_id: str) -> Dict[str, Any]:
         """
-        Reset total_energy for all devices at the beginning of each month.
+        Reset total_energy for one user's devices when their billing cycle advances.
         Historical sensor_data readings are not deleted.
         """
         res = (
             self.supabase
             .table("device")
             .update({"total_energy": 0})
-            .neq("device_id", -1)
+            .eq("user_id", user_id)
             .execute()
         )
 
         return {
-            "status": "monthly_total_energy_reset_done",
-            "message": "Monthly total_energy reset successfully.",
+            "status": "bill_cycle_total_energy_reset_done",
+            "message": "Device total_energy reset for the new billing cycle.",
+            "user_id": user_id,
             "data": res.data or [],
         }
 

@@ -65,29 +65,22 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
         final int deviceId = json['device_id'];
         final String deviceType = (json['device_type'] ?? 'Unknown').toString();
 
-        String latestValue = deviceType;
+        final bool isProduction = deviceType == 'production';
+        double currentReading = isProduction
+            ? _toDouble(json['production'])
+            : _toDouble(json['consumption']);
+        String latestValue = '${currentReading.toStringAsFixed(2)} kW';
 
         try {
           final latestReading = await _apiService.getLatestReading(deviceId);
           final readingValue = latestReading?['kwh_value'];
 
           if (readingValue != null) {
-            latestValue = '${readingValue.toString()} kW';
-          } else if (deviceType == 'production') {
-            final panelCapacity = json['panel_capacity'];
-            if (panelCapacity != null &&
-                panelCapacity.toString().trim().isNotEmpty) {
-              latestValue = '${panelCapacity.toString()} W';
-            }
+            currentReading = _toDouble(readingValue);
+            latestValue = '${currentReading.toStringAsFixed(2)} kW';
           }
         } catch (_) {
-          if (deviceType == 'production') {
-            final panelCapacity = json['panel_capacity'];
-            if (panelCapacity != null &&
-                panelCapacity.toString().trim().isNotEmpty) {
-              latestValue = '${panelCapacity.toString()} W';
-            }
-          }
+          // Keep the current reading value from the device table.
         }
 
         fetchedDevices.add(
@@ -95,9 +88,8 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
             deviceId: deviceId,
             name: json['device_name'] ?? 'Unknown Device',
             value: latestValue,
-            connected:
-                true, // افتراضي لأن الباك إند حالياً لا يرسل حالة الاتصال
-            running: true, // افتراضي
+            connected: currentReading > 0,
+            running: currentReading > 0,
           ),
         );
       }
@@ -117,6 +109,12 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
         });
       }
     }
+  }
+
+  double _toDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
   }
 
   List<DeviceItem> get _filtered {

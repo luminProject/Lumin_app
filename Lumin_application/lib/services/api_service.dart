@@ -71,12 +71,14 @@ class ApiService {
     required String deviceName,
     required String deviceType,
     String? panelCapacity,
+    String? room,
     bool isShiftable = false,
   }) async {
     final body = {
       "name": deviceName,
       "device_type": deviceType,
       "panel_capacity": panelCapacity,
+      "room": deviceType == 'consumption' ? room : null,
       "is_shiftable": deviceType == 'consumption' ? isShiftable : false,
     };
     final response = await http.post(
@@ -365,9 +367,7 @@ class ApiService {
   /// Returns live device readings for the Home page.
   /// Called every 5 seconds by a Timer in HomePage.
   Future<Map<String, dynamic>> getRealtimeData() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/realtime/$_userId'),
-    );
+    final response = await http.get(Uri.parse('$baseUrl/realtime/$_userId'));
     if (response.statusCode == 200) {
       final body = json.decode(response.body) as Map<String, dynamic>;
       return body['data'] as Map<String, dynamic>? ?? {};
