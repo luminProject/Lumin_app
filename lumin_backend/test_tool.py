@@ -1,13 +1,14 @@
 """
 test_tool.py — أداة تست Solar Forecast
-احذفي هذا الملف قبل النشر للإنتاج
 ===========================================
+sensor_data removed — last_reading_at updated directly on device table.
+
 المنطق:
   - يحتفظ بـ "تاريخ افتراضي" في test_state.json
-  - collect N  → يضيف N يوم بيانات للأمام من التاريخ الحالي، يحرك التاريخ
-  - offline N  → يحرك التاريخ N يوم بدون بيانات
-  - reconnect  → يضيف قراءة sensor في التاريخ الحالي
-  - reset      → يمسح كل شيء ويطلب تاريخ بداية جديد
+  - collect N  → يضيف N يوم بيانات للأمام، يحدّث last_reading_at على الجهاز
+  - offline N  → يحرك التاريخ N يوم بدون بيانات (last_reading_at ما يتغيّر)
+  - reconnect  → يحدّث last_reading_at في التاريخ الحالي
+  - reset      → يمسح energycalculation ويطلب تاريخ بداية جديد
   - status     → يعرض الـ JSON من الـ API بالتاريخ الحالي
 """
 
@@ -24,11 +25,11 @@ db = supabase_.create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"
 
 USER_ID    = "7f5f8815-f3f4-49f2-927b-31fb2dce6396"
 BASE_URL   = "http://127.0.0.1:8000"
-STATE_FILE = "test_state.json"   # يُحفظ جانب test_tool.py
+STATE_FILE = "test_state.json"
 
 
 # ═══════════════════════════════════════════════
-#  STATE — يحفظ التاريخ الافتراضي بين الأوامر
+#  STATE
 # ═══════════════════════════════════════════════
 
 def load_state() -> dict:
@@ -79,14 +80,13 @@ def print_status_line(current: date):
 def cmd_collect(user_id: str, days: int):
     """
     يضيف N يوم بيانات للأمام من التاريخ الافتراضي الحالي.
-    يحرك التاريخ الافتراضي للأمام بمقدار N.
-    يضيف sensor_data لآخر يوم (إشارة أن الجهاز شغال).
+    يحدّث last_reading_at على الجهاز بدل sensor_data.
     """
     device = get_device(user_id)
     if not device:
         print("❌ No production device found"); return
 
-    current = get_current_date()
+    current   = get_current_date()
     device_id = device["device_id"]
 
     rows = []
@@ -107,31 +107,51 @@ def cmd_collect(user_id: str, days: int):
 
     new_date = current + timedelta(days=days)
 
-    # أضف sensor_data لآخر يوم
+    # قيم سيمولايشن للجهاز
+    daily_kwh   = 15.0          # إنتاج يومي ثابت للتست
+    total_daily = daily_kwh     # total_energy_daily = إنتاج آخر يوم
+    total_month = daily_kwh * days  # total_energy = مجموع إنتاج الأيام
+
+    # تحديث device بكل الأعمدة الحقيقية
     reading_time = f"{new_date.isoformat()}T12:00:00+00:00"
-    db.table("sensor_data").insert({
-        "device_id":    device_id,
-        "reading_time": reading_time,
-        "kwh_value":    12.5,
-    }).execute()
+    db.table("device").update({
+        "last_reading_at":    reading_time,
+        "production":         500.0,    # Watts لحظية (سيمولايشن)
+        "is_on":              True,
+        "total_energy_daily": total_daily,
+        "total_energy":       total_month,
+    }).eq("device_id", device_id).execute()
 
     set_current_date(new_date)
     print(f"✅ Collected {days} day(s)")
     print(f"   Added energycalculation rows: {current + timedelta(1)} → {new_date}")
-    print(f"   Added sensor reading at {new_date}")
+    print(f"   Updated device: last_reading_at={new_date}, production=500W, is_on=True")
+    print(f"   total_energy_daily={total_daily} kWh, total_energy={total_month} kWh")
     print_status_line(new_date)
 
 
 def cmd_offline(user_id: str, days: int):
     """
     يحرك التاريخ الافتراضي N يوم بدون إضافة بيانات.
-    يمثل مرور أيام الجهاز فيها منقطع.
+    يصفّر production و is_on عشان يعكس الانقطاع.
+    last_reading_at ما يتغيّر — هذا اللي يحسب days_offline.
     """
+    device = get_device(user_id)
+    if not device:
+        print("❌ No production device found"); return
+
+    # صفّر القراءات اللحظية عشان يبيّن الجهاز منقطع
+    db.table("device").update({
+        "production":         0.0,
+        "is_on":              False,
+        "total_energy_daily": 0.0,
+    }).eq("device_id", device["device_id"]).execute()
+
     current  = get_current_date()
     new_date = current + timedelta(days=days)
     set_current_date(new_date)
 
-    print(f"✅ Advanced {days} day(s) offline — no data added")
+    print(f"✅ Advanced {days} day(s) offline — production=0, is_on=False")
     print_status_line(new_date)
     if days >= 15:
         print(f"   ⚠ Total offline may trigger feature_disabled — check status")
@@ -139,8 +159,7 @@ def cmd_offline(user_id: str, days: int):
 
 def cmd_reconnect(user_id: str):
     """
-    يضيف قراءة sensor_data في التاريخ الافتراضي الحالي.
-    لا يمسح ولا يعدل أي شيء آخر.
+    يحدّث last_reading_at في التاريخ الافتراضي الحالي.
     """
     device = get_device(user_id)
     if not device:
@@ -150,34 +169,30 @@ def cmd_reconnect(user_id: str):
     device_id = device["device_id"]
     reading_time = f"{current.isoformat()}T12:00:00+00:00"
 
-    db.table("sensor_data").insert({
-        "device_id":    device_id,
-        "reading_time": reading_time,
-        "kwh_value":    12.5,
-    }).execute()
+    db.table("device").update({
+        "last_reading_at": reading_time
+    }).eq("device_id", device_id).execute()
 
-    print(f"✅ Reconnect reading added at {reading_time}")
+    print(f"✅ Reconnect: updated last_reading_at = {reading_time}")
     print(f"   → days_offline = 0 (from virtual today's perspective)")
-    print(f"   → collected_days و days_missed لا يتأثران")
     print_status_line(current)
 
 
 def cmd_reset(user_id: str):
     """
     ريست كامل:
-    - يمسح sensor_data و energycalculation
+    - يمسح energycalculation
+    - يصفّر last_reading_at على الجهاز
     - يطلب تاريخ بداية جديد
-    - يحفظه كـ current_date في الـ state
     """
     device = get_device(user_id)
     if not device:
         print("❌ No production device found"); return
 
     device_id = device["device_id"]
-    db.table("sensor_data").delete().eq("device_id", device_id).execute()
     db.table("energycalculation").delete().eq("user_id", user_id).execute()
 
-    print("🗑  Cleared sensor_data and energycalculation")
+    print("🗑  Cleared energycalculation")
     print("Enter start date (YYYY-MM-DD), e.g. 2026-03-01:")
     raw = input("> ").strip()
     try:
@@ -185,9 +200,14 @@ def cmd_reset(user_id: str):
     except ValueError:
         print("❌ Invalid date format"); return
 
-    # installation_date = تاريخ البداية
+    # ريست كل أعمدة الجهاز دفعة وحدة
     db.table("device").update({
-        "installation_date": start.isoformat()
+        "installation_date":  start.isoformat(),
+        "last_reading_at":    None,
+        "production":         0.0,
+        "is_on":              False,
+        "total_energy_daily": 0.0,
+        "total_energy":       0.0,
     }).eq("device_id", device_id).execute()
 
     set_current_date(start)
@@ -196,9 +216,6 @@ def cmd_reset(user_id: str):
 
 
 def cmd_status(user_id: str):
-    """
-    GET /solar-forecast/{user_id}?test_date=<current_virtual_date>
-    """
     current = get_current_date()
     url = f"{BASE_URL}/solar-forecast/{user_id}?test_date={current}"
     try:
@@ -210,35 +227,21 @@ def cmd_status(user_id: str):
     except Exception as e:
         print(f"❌ Could not reach {url}: {e}")
         print("   → تأكدي أن uvicorn شغال")
-
     print_status_line(current)
 
 
 def cmd_date():
-    """اعرض التاريخ الافتراضي الحالي"""
     print_status_line(get_current_date())
 
-
-# ═══════════════════════════════════════════════
-#  CLI
-# ═══════════════════════════════════════════════
 
 HELP = """
 استخدامي:
   python test_tool.py collect <days>    أضف N يوم بيانات (يحرك التاريخ للأمام)
   python test_tool.py offline <days>    N يوم بدون بيانات (يحرك التاريخ للأمام)
-  python test_tool.py reconnect         أضف قراءة في التاريخ الحالي
+  python test_tool.py reconnect         حدّث last_reading_at في التاريخ الحالي
   python test_tool.py reset             ريست كامل + اختار تاريخ بداية
   python test_tool.py status            اعرض JSON من API بالتاريخ الحالي
   python test_tool.py date              اعرض التاريخ الافتراضي الحالي
-
-مثال:
-  python test_tool.py reset              ← اختاري 2026-03-01
-  python test_tool.py collect 10         ← 10 أيام بيانات، التاريخ صار 2026-03-11
-  python test_tool.py offline 5          ← 5 أيام انقطاع، التاريخ صار 2026-03-16
-  python test_tool.py status             ← يعرض الحالة في 2026-03-16
-  python test_tool.py reconnect          ← إعادة اتصال في 2026-03-16
-  python test_tool.py status             ← يعرض days_offline=0
 """
 
 if __name__ == "__main__":

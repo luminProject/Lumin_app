@@ -33,7 +33,7 @@ from app.core.lumin_facade import LuminFacade
 from app.scheduler import create_scheduler
 import supabase as supabase_
 from app.models.solar_forecast_service import SolarForecastService
-from app.models.stats_service import StatsService
+from app.models.energy_calculation import EnergyCalculation
 from app.tasks.device_monitor import DeviceMonitor
 
 logging.basicConfig(level=logging.INFO)
@@ -271,8 +271,8 @@ async def get_stats(
     for the requested period.
     """
     try:
-        service = StatsService(supabase)
-        data    = service.get_stats(user_id, range_type, anchor)
+        energy = EnergyCalculation(user_id, supabase)
+        data   = energy.viewSummary(interval=range_type, anchor=anchor)
         return {"status": "success", "data": data}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -531,3 +531,6 @@ def get_realtime_data(user_id: str):
         return facade.getRealtimeData(user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+    stats

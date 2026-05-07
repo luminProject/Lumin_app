@@ -11,9 +11,9 @@ For Grid-only users:
   - Monday 4:00 PM Saudi time → General recommendation
   - Thursday 8:00 PM Saudi time → General recommendation
 
-Also runs Solar Forecast jobs daily (added by Solar Forecast feature):
-  - 8:00 AM Saudi time (05:00 UTC) → Device Monitor (check offline devices)
-  - 8:05 AM Saudi time (05:05 UTC) → Solar Forecast Check (sends forecast_ready if ready)
+Also runs Solar Forecast jobs daily (Sprint 2 — Solar Forecast feature):
+  - 8:00 AM Saudi time (05:00 UTC) → Device Monitor
+  - 8:05 AM Saudi time (05:05 UTC) → Solar Forecast Check
 
 Saudi time = UTC+3
 APScheduler day_of_week values: mon, tue, wed, thu, fri, sat, sun
@@ -28,14 +28,17 @@ from apscheduler.triggers.cron import CronTrigger
 from app.supabase_client import supabase_admin
 from app.core.lumin_facade import LuminFacade
 from app.models.recommendation import Recommendation
-from app.tasks.device_monitor import DeviceMonitor  # added by Solar Forecast feature
-from app.models.solar_forecast_service import SolarForecastService
+from app.tasks.device_monitor import DeviceMonitor
+from app.models.solar_forecast_service import SolarForecastService  # Sprint 2
+
 logger = logging.getLogger(__name__)
 
 
-# ─── Device Monitor Job (added by Solar Forecast feature) ────
+# ─── Device Monitor Job ──────────────────────────────────────
+# Sprint 2 — Solar Forecast feature.
 # Runs daily to check all production devices for missing data.
-# Sends device_warning or feature_disabled notifications as needed.
+# Sends device_warning or feature_disabled via DatabaseManager + FCMService.
+# See Change Log v4, Section 3.12.
 
 async def run_device_monitor():
     """8:00 AM Saudi → check all production devices for missing data."""
@@ -48,17 +51,18 @@ async def run_device_monitor():
         logger.error(f"Scheduler: Device monitor job failed — {e}")
 
 
-# ─── Solar Forecast Check Job (added by Solar Forecast feature) ──
+# ─── Solar Forecast Check Job ────────────────────────────────
+# Sprint 2 — Solar Forecast feature.
 # Runs daily to evaluate forecast state for all users.
-# Sends forecast_ready notification if previous season data is complete.
-# This ensures users receive the notification even without opening the app.
+# Sends forecast_ready notification if previous season is complete (≥ 45 days).
+# Cases: no_panels | collecting | collecting_extended |
+#        forecast_available | feature_disabled
+# See Change Log v4, Section 3.14.
 
 async def run_solar_forecast_check():
-    """8:05 AM Saudi → check forecast state for all users.
-    Sends forecast_ready notification if previous season is complete."""
+    """8:05 AM Saudi → check forecast state for all users."""
     logger.info("Scheduler: Starting solar forecast check job...")
     try:
-        from app.services.solar_forecast_service import SolarForecastService
         solar_svc = SolarForecastService(supabase_admin)
         response  = supabase_admin.table("users").select("user_id").execute()
 
@@ -79,18 +83,6 @@ async def run_solar_forecast_check():
 # ─── Helpers ─────────────────────────────────────────────────
 
 async def _send_to_users(user_filter: str, recommendation_type: str):
-    """
-    Send recommendations to a filtered set of users.
-
-    user_filter:
-      - "solar"     → only users with has_solar_panels = True
-      - "grid_only" → only users without solar
-      - "all"       → all users (not used currently)
-
-    recommendation_type:
-      - "solar"   → custom solar recommendation
-      - "general" → general tip
-    """
     logger.info(
         f"Scheduler: Starting job — filter='{user_filter}', type='{recommendation_type}'"
     )
@@ -174,8 +166,7 @@ async def grid_users_general_recommendation_2():
 async def reset_daily_energy():
     """
     12:00 AM Saudi (21:00 UTC previous day) → reset total_energy_daily
-    for ALL devices to 0.
-    Called once per day at midnight Saudi time.
+    for ALL devices to 0. Called once per day at midnight Saudi time.
     """
     logger.info("Scheduler: Resetting total_energy_daily for all devices...")
     try:
@@ -233,7 +224,7 @@ def create_scheduler() -> AsyncIOScheduler:
     """
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    # 8:00 AM Saudi = 05:00 UTC → Device Monitor (Solar Forecast feature)
+    # 8:00 AM Saudi = 05:00 UTC → Device Monitor (Sprint 2)
     scheduler.add_job(
         run_device_monitor,
         trigger=CronTrigger(hour=5, minute=0),
@@ -242,7 +233,7 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 8:05 AM Saudi = 05:05 UTC → Solar Forecast Check (Solar Forecast feature)
+    # 8:05 AM Saudi = 05:05 UTC → Solar Forecast Check (Sprint 2)
     scheduler.add_job(
         run_solar_forecast_check,
         trigger=CronTrigger(hour=5, minute=5),
@@ -287,7 +278,7 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 12:00 AM Saudi = 21:00 UTC (previous day) → Reset total_energy_daily
+    # 12:00 AM Saudi = 21:00 UTC → Reset total_energy_daily
     scheduler.add_job(
         reset_daily_energy,
         trigger=CronTrigger(hour=21, minute=0),
@@ -296,7 +287,7 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Every minute → UPSERT energycalculation from device.total_energy_daily
+    # Every minute → UPSERT energycalculation
     scheduler.add_job(
         update_energy_calculation,
         trigger=CronTrigger(minute="*"),

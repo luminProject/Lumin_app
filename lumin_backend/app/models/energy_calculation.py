@@ -4,104 +4,133 @@ from dataclasses import dataclass
 from datetime import date as DateType
 import datetime
 from zoneinfo import ZoneInfo
-from typing import List, Any
+from typing import Any, List
 from uuid import UUID
-from calendar import monthrange
 from app.models.observer import Observer
+
 
 @dataclass
 class EnergyCalculation(Observer):
-    # -Energy_id: int
-    Energy_id: int
+    """
+    EnergyCalculation — per class diagram.
 
-    # -date: Date
-    date: DateType
+    Responsibilities:
+      1. Calculate net energy usage for bill prediction (existing)
+      2. Aggregate energy data for the Home screen statistics chart (Sprint 2)
+         via viewSummary(interval, anchor) — delegates to StatsService internally.
 
-    # -total_consumption: float
+    Sprint 2 note:
+      viewSummary() was already declared in the class diagram.
+      StatsService is used here as an internal implementation detail —
+      it does not appear as a separate class in the diagram.
+      See Change Log v4, Section 3.18.
+    """
+
+    # ── Attributes from class diagram ─────────────────────────
+    Energy_id:         int
+    date:              DateType
     total_consumption: float
+    total_production:  float
+    cost_savings:      float
+    carbon_reduction:  float
+    user_id:           UUID | str
+    TARIF:             List[float] | None = None
 
-    # -total_production: float
-    total_production: float
-
-    # -cost_savings: float
-    cost_savings: float
-
-    # -carbon_reduction: float
-    carbon_reduction: float
-
-    # -user_id: uuid
-    user_id: UUID | str
-
-    # -TARIF : double[] [2] = {0.18,0.30}
-    TARIF: List[float] | None = None
-
-    # ربط Supabase
+    # supabase — injected when viewSummary (stats chart) is needed.
+    # Optional: bill prediction callers pass None.
     supabase: Any = None
 
-    def __init__(self, user_id: str):
-        self.Energy_id = 0
-        self.date = DateType.today()
+    def __init__(self, user_id: str, supabase: Any = None):
+        self.Energy_id         = 0
+        self.date              = DateType.today()
         self.total_consumption = 0.0
-        self.total_production = 0.0
-        self.cost_savings = 0.0
-        self.carbon_reduction = 0.0
-        self.user_id = user_id
-        self.TARIF = [0.18, 0.30]
+        self.total_production  = 0.0
+        self.cost_savings      = 0.0
+        self.carbon_reduction  = 0.0
+        self.user_id           = user_id
+        self.TARIF             = [0.18, 0.30]
+        self.supabase          = supabase
 
+    # ── Methods from class diagram ─────────────────────────────
 
-    # +calculateEnergy():void
     def calculateEnergy(self) -> None:
         self.calculateCarbonReduction()
         self.cost_savings = float(self.calculateCostSavings())
-        return None
 
-    # +getEnergyId():int
     def getEnergyId(self) -> int:
         return int(self.Energy_id)
 
-    # +calculateCostSavings():float
     def calculateCostSavings(self) -> float:
         return float(self.cost_savings)
 
-    # +calculateCarbonReduction():void
     def calculateCarbonReduction(self) -> None:
         return None
 
-    # +viewSummary(interval: Duration):void
-
-    def viewSummary(self, interval=None) -> dict:
-        return None
-    # +displayRealTimeEnergy():void
     def displayRealTimeEnergy(self) -> dict:
         return self.viewSummary(None)
 
-    # +update():void
     def update(self, o=None) -> None:
+        """Observer pattern — called when device data updates."""
         self.calculateEnergy()
-        return None
 
-# +getCurrentMonthUsage(): dict 
-# this is the main method that transforms raw energy rows into a clean monthly usage summary for bill prediction.
+    # ── viewSummary — Sprint 2 stats chart ────────────────────
+    # Already declared in the class diagram as viewSummary(interval: Duration).
+    # Delegates to StatsService for aggregation logic.
+    # StatsService is an internal implementation detail — not a
+    # separate class in the diagram.
+
+    def viewSummary(self, interval: Any = None, anchor: str = None) -> dict:
+        """
+        Return aggregated energy data for the Home screen statistics chart.
+
+        Parameters
+        ----------
+        interval : str — "week" | "month" | "year"
+                   Maps to the chart tab the user selected.
+        anchor   : str — reference string for the time range:
+                   week  → YYYY-MM-DD
+                   month → YYYY-MM
+                   year  → YYYY
+
+        Returns
+        -------
+        dict with 'range' and 'points' keys for the Flutter chart widget.
+
+        Delegates to StatsService which contains the aggregation logic.
+        Called by LuminFacade.get_stats() endpoint.
+        """
+        if self.supabase is None or interval is None or anchor is None:
+            return {}
+
+        # StatsService is used internally — not exposed as a separate class
+        from app.services.stats_service import StatsService
+        stats = StatsService(self.supabase)
+        return stats.get_stats(
+            user_id=str(self.user_id),
+            range_type=interval,
+            anchor=anchor,
+        )
+
+    # ── Bill prediction helper ─────────────────────────────────
+    # Called by LuminFacade for billing cycle calculations.
+
     def get_current_month_usage(self, rows: list[dict] | None = None) -> dict:
         """
-        Business logic only.
+        Transform raw energy rows into a monthly usage summary for bill prediction.
 
-        The method name is kept to avoid breaking existing code.
-        However, rows are now already filtered by billing cycle, not calendar month.
+        Rows are pre-filtered by billing cycle (not calendar month).
         """
-        today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
-
-        # Fixed billing cycle length.
+        today        = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
         days_in_month = 30
 
         if not rows:
             return {
-                "user_id": str(self.user_id),
-                "energy_id": self.Energy_id,
-                "date": today.isoformat(),
-                "days_in_month": days_in_month,
-                "daily_net_values": [],
-                "daily_dates": [],
+                "user_id":           str(self.user_id),
+                "energy_id":         self.Energy_id,
+                "date":              today.isoformat(),
+                "days_in_month":     days_in_month,
+                "daily_net_values":  [],
+                "daily_dates":       [],
                 "current_usage_kwh": 0.0,
             }
 
@@ -112,27 +141,26 @@ class EnergyCalculation(Observer):
             if not row_date:
                 continue
 
-            day_str = str(row_date)[:10]
+            day_str          = str(row_date)[:10]
             daily_consumption = float(row.get("total_consumption") or 0.0)
-            daily_solar = float(row.get("solar_production") or 0.0)
+            daily_solar       = float(row.get("solar_production")  or 0.0)
 
-            # Net grid usage used later by bill prediction.
-            daily_grid_consumption = max(daily_consumption - daily_solar, 0.0)
+            # Net grid usage used by bill prediction
+            daily_grid = max(daily_consumption - daily_solar, 0.0)
+            daily_map[day_str] = daily_map.get(day_str, 0.0) + daily_grid
 
-            daily_map[day_str] = daily_map.get(day_str, 0.0) + daily_grid_consumption
-
-        sorted_days = sorted(daily_map.keys())
-        daily_net_values = [round(daily_map[day], 2) for day in sorted_days]
+        sorted_days       = sorted(daily_map.keys())
+        daily_net_values  = [round(daily_map[day], 2) for day in sorted_days]
         current_usage_kwh = round(sum(daily_net_values), 2)
 
         self.total_consumption = current_usage_kwh
 
         return {
-            "user_id": str(self.user_id),
-            "energy_id": self.Energy_id,
-            "date": today.isoformat(),
-            "days_in_month": days_in_month,
-            "daily_net_values": daily_net_values,
-            "daily_dates": sorted_days,
+            "user_id":           str(self.user_id),
+            "energy_id":         self.Energy_id,
+            "date":              today.isoformat(),
+            "days_in_month":     days_in_month,
+            "daily_net_values":  daily_net_values,
+            "daily_dates":       sorted_days,
             "current_usage_kwh": current_usage_kwh,
         }

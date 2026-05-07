@@ -1,4 +1,4 @@
-from datetime import date, datetime as dt, timedelta, timezone
+from datetime import date as DateType, datetime, timedelta, timezone
 import datetime
 from typing import List, Dict, Any
 from app.supabase_client import supabase
@@ -280,7 +280,7 @@ class LuminFacade:
             .insert({
                 "user_id": user_id,
                 "device_name": name,
-                "device_type": device_type,  # e.g., 'consumption' or 'production'
+                "device_type": device_type,
                 "panel_capacity": panel_capacity,
                 "room": room if device_type == "consumption" else None,
                 "is_shiftable": is_shiftable if device_type == "consumption" else False,
@@ -367,7 +367,6 @@ class LuminFacade:
 
         device_ids = [d["device_id"] for d in devices]
         
-        # جلب القراءات (SensorDataReading)
         readings = (
             supabase
             .table("sensor_data")
@@ -377,17 +376,14 @@ class LuminFacade:
             .execute()
         ).data or []
 
-        # فصل حسابات الاستهلاك والإنتاج
         consumption_ids = [d["device_id"] for d in devices if d["device_type"] == "consumption"]
         production_ids = [d["device_id"] for d in devices if d["device_type"] == "production"]
 
         total_consumption = sum(r["kwh_value"] for r in readings if r["device_id"] in consumption_ids)
         total_production = sum(r["kwh_value"] for r in readings if r["device_id"] in production_ids)
 
-        # حساب التوفير المالي (الإنتاج المستفاد منه * التعرفة الأساسية)
         cost_savings = total_production * 0.18 
         
-        # نسبة تقليل الكربون (عملية حسابية تقريبية كمثال بناءً على متطلبات النظام)
         carbon_reduction_percent = (total_production / total_consumption * 100) if total_consumption > 0 else 0
 
         return {
@@ -404,13 +400,6 @@ class LuminFacade:
     # -----------------------------
 
     def _get_current_cycle_dates(self, user_id: str) -> tuple[DateType, DateType]:
-        """
-        Get current billing cycle dates.
-
-        users.last_billing_end_date = last day included in the previous bill.
-        current cycle starts the next day.
-        cycle length = 30 days.
-        """
         today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
 
         last_end = self.db.get_user_last_billing_end_date(user_id)
@@ -423,9 +412,6 @@ class LuminFacade:
         cycle_start = last_end + timedelta(days=1)
         cycle_end = cycle_start + timedelta(days=29)
 
-        # If current stored date is old, move cycle forward.
-        # When the bill cycle moves forward, reset device total_energy for the same user
-        # so device totals and bill prediction start from the same cycle.
         while today > cycle_end:
             last_end = cycle_end
             self.db.update_user_last_billing_end_date(user_id, last_end)
@@ -437,28 +423,14 @@ class LuminFacade:
         return cycle_start, cycle_end
 
 
-    # =========================
-    # BILL LIMIT
-    # =========================
     def set_bill_limit(self, user_id: str, limit: int | float) -> None:
-        """
-        Set or update the user's bill limit for the current billing cycle.
-
-        Important:
-        - Uses the current billing cycle.
-        - If the current cycle row exists, it updates it.
-        - If not, it carries only limit_amount from the latest old row.
-        """
         if not user_id:
             raise ValueError("Your session has expired. Please sign in again.")
 
         cycle_start, cycle_end = self._get_current_cycle_dates(user_id)
 
-        # Get exact row for current billing cycle.
         current_bill_row = self.db.get_bill_row_by_cycle(user_id, cycle_start)
 
-        # If no current-cycle row exists, carry only limit_amount from latest row.
-        # Do NOT carry old prediction/checkpoint data.
         if not current_bill_row:
             latest_bill_row = self.db.get_latest_bill_row(user_id)
 
@@ -489,19 +461,7 @@ class LuminFacade:
         self.db.save_current_cycle_bill(user_id, payload)
 
 
-    # =========================
-    # BILL GET
-    # =========================
     def get_my_current_bill(self, user_id: str) -> Dict[str, Any]:
-        """
-        GET /bill.
-
-        Responsibilities:
-        - Calculate current billing cycle.
-        - Sync current usage/current bill.
-        - Save or update billprediction row.
-        - Return setup_required if billing date is missing.
-        """
         try:
             cycle_start, cycle_end = self._get_current_cycle_dates(user_id)
 
@@ -530,11 +490,8 @@ class LuminFacade:
             cycle_end,
         )
 
-        # Get exact row for current billing cycle.
         current_bill_row = self.db.get_bill_row_by_cycle(user_id, cycle_start)
 
-        # If no current-cycle row exists, carry only limit_amount from latest row.
-        # This prevents old forecast/checkpoint data from leaking into a new cycle.
         if not current_bill_row:
             latest_bill_row = self.db.get_latest_bill_row(user_id)
 
@@ -560,18 +517,7 @@ class LuminFacade:
         return bill_manager.to_dict()
 
 
-    # =========================
-    # BILL CHECKPOINT SCHEDULER
-    # =========================
     def run_bill_checkpoint_for_user(self, user_id: str) -> Dict[str, Any]:
-        """
-        Called by APScheduler daily.
-
-        Important:
-        - Facade only prepares data and sends notification.
-        - BillPrediction.PredictBill decides if checkpoint 7/14/21/28 is due.
-        - Forecast uses completed days only.
-        """
         cycle_start, cycle_end = self._get_current_cycle_dates(user_id)
 
         energy_rows = self.db.get_current_cycle_energy_rows(
@@ -580,11 +526,8 @@ class LuminFacade:
             cycle_end,
         )
 
-        # Get exact row for current billing cycle.
         current_bill_row = self.db.get_bill_row_by_cycle(user_id, cycle_start)
 
-        # If no current-cycle row exists, carry only limit_amount from latest row.
-        # Do NOT carry predicted_bill, forecast_available, or last_checkpoint_day.
         if not current_bill_row:
             latest_bill_row = self.db.get_latest_bill_row(user_id)
 
@@ -605,14 +548,12 @@ class LuminFacade:
 
         old_checkpoint = bill_manager.get_last_checkpoint()
 
-        # PredictBill now decides internally whether a checkpoint is due.
         checkpoint_day = bill_manager.PredictBill(bill_data)
 
         if checkpoint_day is None:
             return bill_manager.to_dict()
 
         new_checkpoint = bill_manager.get_last_checkpoint()
-        # Send notification only once per checkpoint.
         if new_checkpoint == checkpoint_day and old_checkpoint != checkpoint_day:
 
             if bill_manager.Get_limit_amount() <= 0 :
@@ -671,12 +612,6 @@ class LuminFacade:
 
 
     def run_bill_checkpoint_for_all_users(self) -> Dict[str, Any]:
-        """
-        Called by daily scheduler.
-
-        Runs bill checkpoint logic for all users who have energy rows.
-        One user failure should not stop the whole scheduler.
-        """
         user_ids = self.db.get_users_with_energy()
 
         processed_users = 0
@@ -708,18 +643,12 @@ class LuminFacade:
             "skipped_users": skipped_users,
             "errors": errors,
         }
-   
-   
-   
+
 
     # -----------------------------
     # BILL CYCLE TOTAL ENERGY RESET
     # -----------------------------
     def reset_total_energy_for_user(self, user_id: str) -> Dict[str, Any]:
-        """
-        Reset total_energy for one user's devices when their billing cycle advances.
-        Historical sensor_data readings are not deleted.
-        """
         res = (
             self.supabase
             .table("device")
@@ -735,144 +664,45 @@ class LuminFacade:
             "data": res.data or [],
         }
 
-    # -----------------------------
-    # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS 
-    # -----------------------------
-    # -----------------------------
-    # FORECASTING, RECOMMENDATIONS, & NOTIFICATIONS
-    # -----------------------------
+    # ═══════════════════════════════════════════════════════════════
+    # SOLAR FORECAST (Sprint 2)
+    # ---------------------------------------------------------------
+    # Delegates entirely to SolarForecastService which implements the
+    # 5-case state machine. See Change Log v4, Section 3.14.
+    #
+    # Cases returned by SolarForecastService.get_forecast_state():
+    #   no_panels          — user has no production device registered
+    #   collecting         — collecting data in current season
+    #   collecting_extended — installed near end of season, extends to next
+    #   forecast_available — previous season complete (≥ 45 days)
+    #   feature_disabled   — device offline ≥ 15 days
+    #
+    # Design notes:
+    #   - No direct Supabase access here — all DB goes through
+    #     SolarForecastService → DatabaseManager.
+    #   - WeatherData class removed (Change Log v4, Section 3.2).
+    #   - has_solar_panels flag removed — state derived at runtime
+    #     from device table and energycalculation (CL v4, Section 3.9).
+    #   - α (performance factor) computed in Flutter only, never here
+    #     (Change Log v4, Section 3.17).
+    # ═══════════════════════════════════════════════════════════════
+
     def get_solar_prediction(self, user_id: str) -> Dict[str, Any]:
         """
-        Solar Forecast — per updated class diagram (Change Log Section 3.3).
+        Solar Forecast state machine — delegates to SolarForecastService.
 
-        Case 1 — No solar panels (has_solar_panels = False or NULL):
-            Returns regional GHI estimate from the pre-built JSON
-            based on the user's nearest site (lat/lng from users table).
-            Includes estimated monthly production for a 5 kWp reference system.
-
-        Case 2/3 — Has solar panels (has_solar_panels = True):
-            Returns the personalized monthly GHI forecast for years 2026-2028,
-            stored in solar_forecast table (monthly_ghi_forecast JSONB).
-            If no stored forecast exists yet, falls back to regional estimate.
+        Returns a dict with `case` key and case-specific fields.
+        The Flutter UI uses `case` to decide which screen to render.
         """
-        from app.models.xgboost_solar_model import XGBoostSolarModel
-        from app.models.solar_forecast import SolarForecast
+        from app.models.solar_forecast_service import SolarForecastService
+        service = SolarForecastService(self.supabase)
+        return service.get_forecast_state(user_id)
 
-        # ── 1. Get user profile (location + solar panel status) ────────────────
-        user_res = (
-            self.supabase.table("users")
-            .select("has_solar_panels, latitude, longitude, location")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if not user_res.data:
-            raise ValueError("User not found")
-
-        user = user_res.data[0]
-        has_panels = user.get("has_solar_panels") or False
-        lat = user.get("latitude")
-        lng = user.get("longitude")
-
-        # ── 2. Load XGBoost model (reads JSON once) ────────────────────────────
-        xgb_model = XGBoostSolarModel()
-        xgb_model.loadModel()
-        solar_forecast = SolarForecast(forecast_id=0, model=xgb_model)
-
-        # ── 3. Find nearest site from user coordinates ─────────────────────────
-        if lat is None or lng is None:
-            # Fallback: use Jeddah KAU coordinates if user has no location set
-            lat, lng = 21.4858, 39.1925
-
-        nearest_site = xgb_model.getNearestSite(lat, lng)
-        site_info    = xgb_model.getSiteInfo(nearest_site)
-
-        # ── CASE 1: No solar panels ────────────────────────────────────────────
-        if not has_panels:
-            # Return regional GHI + estimated production for 5 kWp reference system
-            # Formula: E (kWh/month) = GHI_daily (kWh/m²/day) × PR × P_nom × days
-            # PR = 0.78 (Al-Shalabi et al., 2024 — Saudi PR range 77%-84.27%)
-            # P_nom = 5.0 kWp (illustrative reference system, not a cited value)
-            # Reference: Dobos (2014) PVWatts Version 5 Manual, NREL/TP-6A20-62641
-
-            PR     = 0.78
-            P_NOM  = 5.0   # kWp — illustrative only
-            DAYS   = 30
-
-            monthly_ghi_2026 = {}
-            monthly_production_kwh = {}
-
-            for month in range(1, 13):
-                ghi_daily = xgb_model.predict(nearest_site, month, 2026)  # Wh/m²/day
-                ghi_kwh   = ghi_daily / 1000                              # kWh/m²/day
-                monthly_ghi_2026[str(month)]        = round(ghi_daily, 1)
-                monthly_production_kwh[str(month)]  = round(ghi_kwh * PR * P_NOM * DAYS, 1)
-
-            annual_avg_ghi = xgb_model.getAnnualAvgGhi(nearest_site, 2026)
-
-            return {
-                "case": "no_panels",
-                "nearest_site": nearest_site,
-                "cluster": site_info.get("cluster"),
-                "annual_avg_ghi_wh_m2_day": annual_avg_ghi,
-                "monthly_ghi_2026": monthly_ghi_2026,
-                "estimated_monthly_production_kwh": monthly_production_kwh,
-                "reference_system_kwp": P_NOM,
-                "performance_ratio": PR,
-                "note": "Production estimate uses a 5 kWp illustrative system. Actual output depends on installed capacity and site conditions.",
-            }
-
-        # ── CASE 2/3: Has solar panels ─────────────────────────────────────────
-        # Try to return stored personalized forecast from solar_forecast table
-        stored_res = (
-            self.supabase.table("solar_forecast")
-            .select("forecast_id, season, monthly_ghi_forecast, bias_corrected, is_personalized")
-            .eq("user_id", user_id)
-            .eq("is_personalized", True)
-            .order("forecast_id", desc=True)
-            .limit(1)
-            .execute()
-        )
-
-        if stored_res.data:
-            row = stored_res.data[0]
-            return {
-                "case": "has_panels_with_forecast",
-                "nearest_site": nearest_site,
-                "cluster": site_info.get("cluster"),
-                "season": row.get("season"),
-                "monthly_ghi_forecast": row.get("monthly_ghi_forecast"),
-                "bias_corrected": row.get("bias_corrected"),
-                "is_personalized": True,
-            }
-
-        # No stored forecast yet — return full 2026-2028 forecast from JSON
-        forecast_2026 = solar_forecast.getForecastForSite(nearest_site, 2026)
-        forecast_2027 = solar_forecast.getForecastForSite(nearest_site, 2027)
-        forecast_2028 = solar_forecast.getForecastForSite(nearest_site, 2028)
-
-        return {
-            "case": "has_panels_no_stored_forecast",
-            "nearest_site": nearest_site,
-            "cluster": site_info.get("cluster"),
-            "bias_corrected": True,
-            "is_personalized": False,
-            "forecast": {
-                "2026": {str(m): v for m, v in enumerate(forecast_2026, 1)},
-                "2027": {str(m): v for m, v in enumerate(forecast_2027, 1)},
-                "2028": {str(m): v for m, v in enumerate(forecast_2028, 1)},
-            },
-            "annual_avg_ghi": {
-                "2026": xgb_model.getAnnualAvgGhi(nearest_site, 2026),
-                "2027": xgb_model.getAnnualAvgGhi(nearest_site, 2027),
-                "2028": xgb_model.getAnnualAvgGhi(nearest_site, 2028),
-            },
-        }
+    # ═══════════════════════════════════════════════════════════════
+    # END SOLAR FORECAST — Sprint 2
+    # ═══════════════════════════════════════════════════════════════
 
     def view_recommendations(self, user_id: str) -> List[Dict[str, Any]]:
-        """
-        الـ Recommendation class يخزن نص التوصية (recommendation_text)، وقت إنشائها (creation_time)، و id المستخدم.
-        """
         res = (
             supabase
             .table("recommendation")
@@ -884,10 +714,6 @@ class LuminFacade:
         return res.data or []
 
     def get_notifications(self, user_id: str) -> List[Dict[str, Any]]:
-
-        """
-        الـ Notification class يخزن محتوى الإشعار (content)، نوعه (type)، وقته (time).
-        """
         res = (
             supabase
             .table("notification")
@@ -904,53 +730,31 @@ class LuminFacade:
     # -----------------------------
 
     def viewRecommendations(self, user_id: str, recommendation_type: str = "auto") -> Dict[str, Any]:
-        """
-        Generate + save recommendation. Automatically creates a notification + push.
-
-        Scheduler delivery (Saudi time):
-          - Solar users:
-              * Saturday 3 PM → custom solar recommendation
-              * Tuesday  7 PM → general tip
-          - Grid-only users:
-              * Monday   4 PM → general tip
-              * Thursday 8 PM → general tip
-
-        recommendation_type:
-          - "solar"   → force solar recommendation
-          - "general" → force general recommendation
-          - "auto"    → decide based on user type (used for manual API calls)
-        """
-        # Force general
         if recommendation_type == "general":
             return self._generate_general_recommendation(user_id)
 
-        # Force solar (or auto with solar user)
         if recommendation_type == "solar":
             user_profile = self.db.get_user_profile_row(user_id)
             if Recommendation.userHasSolar(user_profile):
                 return self._generate_solar_recommendation(user_id)
-            # Solar user without solar config → fall back to general
             return self._generate_general_recommendation(user_id)
 
-        # Auto (manual API): decide based on profile
         user_profile = self.db.get_user_profile_row(user_id)
         if Recommendation.userHasSolar(user_profile):
             return self._generate_solar_recommendation(user_id)
         return self._generate_general_recommendation(user_id)
 
     def _generate_solar_recommendation(self, user_id: str) -> Dict[str, Any]:
-        """Generate a solar-based recommendation. Falls back to general if data is missing."""
+        from datetime import datetime as dt
         end_date = dt.now(timezone.utc)
         start_date = end_date - timedelta(days=7)
 
-        # Get production devices
         production_devices = self.db.get_devices_by_type(user_id, "production")
         if not production_devices:
             return self._generate_general_recommendation(user_id, fallback_reason="NO_PRODUCTION_DEVICES")
 
         production_device_ids = [d["device_id"] for d in production_devices]
 
-        # Get solar readings for last 7 days
         solar_rows = self.db.get_sensor_rows_for_devices(
             device_ids=production_device_ids,
             start_date=start_date,
@@ -959,7 +763,6 @@ class LuminFacade:
         if not solar_rows:
             return self._generate_general_recommendation(user_id, fallback_reason="NO_SOLAR_READINGS")
 
-        # Get shiftable consumption devices and their readings
         shiftable_devices = self.db.get_shiftable_consumption_devices(user_id)
 
         device_readings_by_id: Dict[int, List[Dict[str, Any]]] = {}
@@ -975,7 +778,6 @@ class LuminFacade:
                 if did is not None:
                     device_readings_by_id.setdefault(did, []).append(row)
 
-        # Build recommendation using the Model
         recommendation = Recommendation(user_id=user_id)
         success = recommendation.buildSolarFromReadings(
             solar_rows=solar_rows,
@@ -986,10 +788,7 @@ class LuminFacade:
         if not success:
             return self._generate_general_recommendation(user_id, fallback_reason="BEST_PERIOD_NOT_FOUND")
 
-        # Save via DatabaseManager
         saved = self.db.insert_recommendation(recommendation.build_db_payload())
-
-        # Send notification + push
         self._send_notification_and_push(user_id, recommendation.recommendation_text)
 
         response = recommendation.to_response_dict()
@@ -1006,7 +805,6 @@ class LuminFacade:
         return response
 
     def _generate_general_recommendation(self, user_id: str, fallback_reason: str = None) -> Dict[str, Any]:
-        """Pick a random general tip from the database and save it."""
         general_text = self.db.get_random_general_recommendation_text()
         if not general_text:
             return {
@@ -1019,14 +817,10 @@ class LuminFacade:
                 "recommendation": None,
             }
 
-        # Build via Model
         recommendation = Recommendation(user_id=user_id)
         recommendation.buildFromGeneralText(general_text)
 
-        # Save via DatabaseManager
         saved = self.db.insert_recommendation(recommendation.build_db_payload())
-
-        # Send notification + push
         self._send_notification_and_push(user_id, general_text)
 
         return {
@@ -1041,13 +835,9 @@ class LuminFacade:
         }
 
     def _send_notification_and_push(self, user_id: str, recommendation_text: str) -> None:
-        """Save a notification to DB and trigger an FCM push if a token exists."""
         notification = Notification.forRecommendation(user_id, recommendation_text)
-
-        # Save via DatabaseManager
         self.db.insert_notification(notification.build_db_payload())
 
-        # Send FCM push (silent on failure)
         try:
             fcm_token = self.db.get_user_fcm_token(user_id)
             if fcm_token:
@@ -1120,9 +910,6 @@ class LuminFacade:
     # -----------------------------
 
     def getUserDevices(self, user_id: str) -> Dict[str, Any]:
-        """
-        Fetch all user devices and convert them into objects using DeviceFactory.
-        """
         response = (
             self.supabase.table("device")
             .select("*")
@@ -1153,9 +940,6 @@ class LuminFacade:
         }
 
     def getUserDeviceInfos(self, user_id: str) -> Dict[str, Any]:
-        """
-        Returns simplified device information for UI/debugging.
-        """
         devices_result = self.getUserDevices(user_id)
 
         if not devices_result["data"]:
@@ -1187,7 +971,6 @@ class LuminFacade:
         }
 
     # -----------------------------
-    # -----------------------------
     # REAL-TIME MONITORING
     # Pattern: Facade → Model → DatabaseManager
     # -----------------------------
@@ -1198,40 +981,22 @@ class LuminFacade:
         watts: float,
         reading_time_iso: str,
     ) -> Dict[str, Any]:
-        """
-        Process one live sensor reading.
-        Coordinates between RealtimeReading model and DatabaseManager.
-        """
-        # 1) Get current device row from DB
         device = self.db.get_device_row(device_id)
         if not device:
             return {"success": False, "message": f"Device {device_id} not found."}
 
-        # 2) Build Model — loads state from device row
         reading = RealtimeReading.fromDeviceRow(
             device_row=device,
             watts=watts,
             reading_time_iso=reading_time_iso,
         )
 
-        # 3) Model does all calculations
         reading.process()
-
-        # 4) Persist via DatabaseManager
         self.db.update_device_realtime(device_id, reading.build_db_payload())
 
-        # 5) Return response
         return reading.to_response_dict()
 
     def getRealtimeData(self, user_id: str) -> Dict[str, Any]:
-        """
-        Returns cumulative daily energy totals for all user devices.
-        Used by the Home page to show:
-          - solar_production_kwh  → total_energy_daily of production devices
-          - total_consumption_kwh → total_energy_daily of consumption devices
-          - grid_kwh              → max(0, consumption - solar)
-          - instant_watts         → current live watts per device (for is_on status)
-        """
         rows = self.db.get_user_devices_realtime(user_id)
 
         if not rows:
@@ -1248,7 +1013,6 @@ class LuminFacade:
                 },
             }
 
-        # Use Model for aggregation
         summary = RealtimeSummary(rows)
         summary.compute()
 

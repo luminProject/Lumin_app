@@ -324,98 +324,73 @@ class TestConstants:
 # ══════════════════════════════════════════════════════════════════
 
 class TestCaseRouting:
+    """
+    Tests the 5-case state machine in get_forecast_state().
+    self.db (DatabaseManager) is replaced with MagicMock so no
+    real DB or supabase connection is needed.
 
-    def _make_chain(self, data):
+    New days_offline logic (updated):
+      1. get_today_solar_production() checked first
+      2. If 0 → get_latest_production_reading() used for days_offline
+      is_on is NOT used — wiring issues can cause is_on=True + zero production.
+    """
+
+    def _make_service_with_db(self):
         """
-        Helper: creates a mock Supabase query chain that returns
-        the given data list when .execute() is called.
-        Any method call on the chain returns the chain itself
-        (method chaining pattern used by Supabase client).
+        Create SolarForecastService with a fully mocked DatabaseManager.
+        Patch self.db directly — cleaner than mocking raw supabase chains.
         """
-        mock_result = MagicMock()
-        mock_result.data = data
-        chain = MagicMock()
-        chain.execute.return_value = mock_result
-        # All query methods return the chain itself (for chaining)
-        for method in ["select", "eq", "gte", "lte", "gt", "order",
-                       "limit", "ilike", "inFilter"]:
-            getattr(chain, method).return_value = chain
-        return chain
+        from app.models.solar_forecast_service import SolarForecastService
+        mock_supabase = MagicMock()
+        service       = SolarForecastService(mock_supabase)
+        service.db    = MagicMock()
+        return service
 
     def test_no_panels_case_when_no_production_device(self):
         """
         SCENARIO: User has no production device registered.
         EXPECTED: case = 'no_panels'
-        WHY: Without a solar panel device, no data can be collected.
-             The app should show regional GHI estimate instead.
+        WHY: Without a solar panel, no data can be collected.
+             The app shows a regional GHI estimate instead.
         """
-        from app.models.solar_forecast_service import SolarForecastService
+        service = self._make_service_with_db()
 
-        mock_supabase = MagicMock()
+        service.db.get_user_location.return_value = {
+            "location": "Jeddah", "latitude": 21.49, "longitude": 39.19
+        }
+        # No production device → no_panels
+        service.db.get_production_device.return_value = None
 
-        # User exists with a location
-        user_chain = self._make_chain([{
-            "location": "Jeddah",
-            "latitude": 21.49,
-            "longitude": 39.19
-        }])
+        result = service.get_forecast_state("test-user", test_date="2026-06-15")
 
-        # No production devices found
-        device_chain = self._make_chain([])
-
-        def table_router(name):
-            if name == "users":  return user_chain
-            if name == "device": return device_chain
-            return self._make_chain([])
-
-        mock_supabase.table.side_effect = table_router
-
-        service = SolarForecastService(mock_supabase)
-        result  = service.get_forecast_state("test-user", test_date="2026-06-15")
-
-        assert result["case"] == "no_panels", \
-            f"Expected 'no_panels', got '{result['case']}'"
+        assert result["case"] == "no_panels"
+        assert "avg_daily_ghi" in result
 
     def test_feature_disabled_when_offline_15_or_more_days(self):
         """
-        SCENARIO: Device has been offline for exactly 15 days.
-        EXPECTED: case = 'feature_disabled'
-        WHY: After FEATURE_DISABLE_DAYS (15) consecutive days without
-             a sensor reading, the Solar Forecast feature is paused.
-             This protects users from seeing stale/misleading data.
+        SCENARIO: No solar production today. Last reading was 15 days ago.
+        EXPECTED: case = 'feature_disabled', days_offline >= 15
+        WHY: After FEATURE_DISABLE_DAYS (15) days with no reading,
+             the forecast is paused to protect users from stale data.
+             days_offline is based on last_reading_at, not is_on,
+             because wiring issues can cause is_on=True + zero production.
         """
-        from app.models.solar_forecast_service import SolarForecastService
+        service = self._make_service_with_db()
 
-        mock_supabase = MagicMock()
-
-        user_chain = self._make_chain([{
-            "location": "Riyadh",
-            "latitude": 24.71,
-            "longitude": 46.68
-        }])
-
-        device_chain = self._make_chain([{
-            "device_id": 1,
-            "panel_capacity": 5.0,
+        service.db.get_user_location.return_value = {
+            "location": "Riyadh", "latitude": 24.71, "longitude": 46.68
+        }
+        service.db.get_production_device.return_value = {
+            "device_id": 1, "panel_capacity": 5.0,
             "installation_date": "2026-01-01",
-        }])
+        }
+        # Step 1: no production today → proceed to check last_reading_at
+        service.db.get_today_solar_production.return_value = 0.0
+        # Step 2: latest reading was 2026-04-20 → days_offline = 15 (May 5 - Apr 20)
+        service.db.get_latest_production_reading.return_value = \
+            "2026-04-20T12:00:00+00:00"
 
-        # Last reading was 15 days ago (exactly at the disable threshold)
-        sensor_chain = self._make_chain([{
-            "reading_time": "2026-04-20T12:00:00"
-        }])
-
-        def table_router(name):
-            if name == "users":       return user_chain
-            if name == "device":      return device_chain
-            if name == "sensor_data": return sensor_chain
-            return self._make_chain([])
-
-        mock_supabase.table.side_effect = table_router
-
-        service = SolarForecastService(mock_supabase)
-        # test_date = May 5 → days_offline = May5 - Apr20 = 15 days
-        result  = service.get_forecast_state("test-user", test_date="2026-05-05")
+        result = service.get_forecast_state("test-user", test_date="2026-05-05")
 
         assert result["case"] == "feature_disabled", \
             f"Expected 'feature_disabled', got '{result['case']}'"
@@ -423,62 +398,37 @@ class TestCaseRouting:
 
     def test_collecting_case_when_device_installed_start_of_season(self):
         """
-        SCENARIO: Device installed at start of spring (March 1).
-                  Today is March 20 — 19 days of data collected.
-                  No previous season data exists.
-        EXPECTED: case = 'collecting'
-        WHY: Device is active, collecting data in the current season,
-             but previous season has no data so forecast_available
-             is not triggered. This is the normal early-stage state.
+        SCENARIO: Device installed March 1. Today March 20.
+                  19 days of production data collected.
+                  No previous season data.
+        EXPECTED: case = 'collecting', collected_days = 19
+        WHY: Device is active (production > 0 today → days_offline = 0).
+             Previous season has no data so forecast_available not triggered.
         """
-        from app.models.solar_forecast_service import SolarForecastService
+        service = self._make_service_with_db()
 
-        mock_supabase = MagicMock()
-
-        user_chain = self._make_chain([{
-            "location": "Jeddah",
-            "latitude": 21.49,
-            "longitude": 39.19
-        }])
-
-        # Device installed March 1 — start of spring
-        device_chain = self._make_chain([{
-            "device_id": 2,
-            "panel_capacity": 5.0,
+        service.db.get_user_location.return_value = {
+            "location": "Jeddah", "latitude": 21.49, "longitude": 39.19
+        }
+        service.db.get_production_device.return_value = {
+            "device_id": 2, "panel_capacity": 5.0,
             "installation_date": "2026-03-01",
-        }])
+        }
+        # Production > 0 today → days_offline = 0 (no need to check last_reading_at)
+        service.db.get_today_solar_production.return_value = 15.0
 
-        # Last reading was today (days_offline = 0)
-        sensor_chain = self._make_chain([{
-            "reading_time": "2026-03-20T12:00:00"
-        }])
-
-        # 19 rows in current season (spring 2026)
-        ec_current = self._make_chain([
+        # 19 rows in current season (spring), 0 in previous (winter)
+        ec_current = [
             {"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 15.0}
             for i in range(1, 20)
-        ])
+        ]
+        service.db.get_season_energy_rows.side_effect = [
+            ec_current,  # first call = current season
+            [],          # second call = previous season (no data)
+        ]
+        service.db.check_notification_exists.return_value = False
 
-        # No data in previous season (winter) → no forecast_available
-        ec_prev = self._make_chain([])
-
-        call_count = {"ec": 0}
-
-        def table_router(name):
-            if name == "users":              return user_chain
-            if name == "device":             return device_chain
-            if name == "sensor_data":        return sensor_chain
-            if name == "notification":       return self._make_chain([])
-            if name == "energycalculation":
-                call_count["ec"] += 1
-                # First call = current season, second call = previous season
-                return ec_current if call_count["ec"] == 1 else ec_prev
-            return self._make_chain([])
-
-        mock_supabase.table.side_effect = table_router
-
-        service = SolarForecastService(mock_supabase)
-        result  = service.get_forecast_state("test-user", test_date="2026-03-20")
+        result = service.get_forecast_state("test-user", test_date="2026-03-20")
 
         assert result["case"] == "collecting", \
             f"Expected 'collecting', got '{result['case']}'"
@@ -486,71 +436,48 @@ class TestCaseRouting:
 
     def test_forecast_available_when_previous_season_complete(self):
         """
-        SCENARIO: Today is June 15 (summer). Previous season = spring.
-                  Spring has 50 days of collected data (≥ 45 = complete).
-                  Device was installed BEFORE current season started.
-        EXPECTED: case = 'forecast_available'
-        WHY: When the previous season has ≥ MIN_COLLECTION_DAYS (45) rows
-             AND the device was not installed in the current season,
-             the system has enough data to compute a personalized forecast.
-             This is the target state users want to reach.
+        SCENARIO: Today June 15 (summer). Previous season = spring.
+                  Spring has 50 days of data (≥ 45 = MIN_COLLECTION_DAYS).
+                  Device installed in winter (before current season).
+        EXPECTED: case = 'forecast_available', prev_season = 'spring'
+        WHY: Enough previous-season data exists to generate a personalized
+             forecast. This is the target state for the feature.
         """
-        from app.models.solar_forecast_service import SolarForecastService
+        service = self._make_service_with_db()
 
-        mock_supabase = MagicMock()
+        service.db.get_user_location.return_value = {
+            "location": "Jeddah", "latitude": 21.49, "longitude": 39.19
+        }
+        service.db.get_production_device.return_value = {
+            "device_id": 3, "panel_capacity": 5.0,
+            "installation_date": "2026-01-15",  # installed in winter
+        }
+        # Production > 0 today → days_offline = 0
+        service.db.get_today_solar_production.return_value = 15.0
 
-        user_chain = self._make_chain([{
-            "location": "Jeddah",
-            "latitude": 21.49,
-            "longitude": 39.19
-        }])
-
-        # Device installed in winter (before current summer season)
-        device_chain = self._make_chain([{
-            "device_id": 3,
-            "panel_capacity": 5.0,
-            "installation_date": "2026-01-15",
-        }])
-
-        # Last reading was today → days_offline = 0
-        sensor_chain = self._make_chain([{
-            "reading_time": "2026-06-15T12:00:00"
-        }])
-
-        # Current season (summer): only 15 days collected so far
-        ec_current = self._make_chain([
+        # Current season (summer): 15 rows; Previous season (spring): 50 rows
+        ec_current = [
             {"date": f"2026-06-{str(i).zfill(2)}", "solar_production": 15.0}
             for i in range(1, 16)
-        ])
-
-        # Previous season (spring): 50 days collected ≥ MIN_COLLECTION_DAYS
-        ec_prev = self._make_chain([
+        ]
+        ec_prev = [
             {"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 15.0}
             for i in range(1, 46)
         ] + [
             {"date": f"2026-04-{str(i).zfill(2)}", "solar_production": 15.0}
             for i in range(1, 6)
-        ])
+        ]
+        service.db.get_season_energy_rows.side_effect = [
+            ec_current,  # first call = current season
+            ec_prev,     # second call = previous season (50 rows ≥ 45)
+        ]
+        service.db.check_notification_exists.return_value = False
+        service.db.insert_notification.return_value = {}
+        service.db.get_user_fcm_token.return_value = None
 
-        call_count = {"ec": 0}
-
-        def table_router(name):
-            if name == "users":              return user_chain
-            if name == "device":             return device_chain
-            if name == "sensor_data":        return sensor_chain
-            if name == "notification":       return self._make_chain([])
-            if name == "energycalculation":
-                call_count["ec"] += 1
-                return ec_current if call_count["ec"] == 1 else ec_prev
-            return self._make_chain([])
-
-        mock_supabase.table.side_effect = table_router
-
-        service = SolarForecastService(mock_supabase)
-        result  = service.get_forecast_state("test-user", test_date="2026-06-15")
+        result = service.get_forecast_state("test-user", test_date="2026-06-15")
 
         assert result["case"] == "forecast_available", \
             f"Expected 'forecast_available', got '{result['case']}'"
-        assert "actual_by_month" in result, \
-            "forecast_available must include 'actual_by_month' for the chart"
         assert result["prev_season"] == "spring"
+        assert "actual_by_month" in result

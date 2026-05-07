@@ -30,8 +30,7 @@ class DatabaseManager:
         """
 
         result = (
-            self.supabase
-            .table("users")
+            self.supabase.table("users")
             .select("*")
             .eq("user_id", str(user_id))
             .limit(1)
@@ -46,12 +45,7 @@ class DatabaseManager:
         Insert user profile row.
         """
 
-        result = (
-            self.supabase
-            .table("users")
-            .insert(row)
-            .execute()
-        )
+        result = self.supabase.table("users").insert(row).execute()
 
         rows = getattr(result, "data", None) or []
 
@@ -70,8 +64,7 @@ class DatabaseManager:
         """
 
         (
-            self.supabase
-            .table("users")
+            self.supabase.table("users")
             .update(info)
             .eq("user_id", str(user_id))
             .execute()
@@ -83,6 +76,7 @@ class DatabaseManager:
             raise ValueError("Profile not found")
 
         return row
+
     # =============================
     # USER BILLING DATE
     # =============================
@@ -97,8 +91,7 @@ class DatabaseManager:
         """
 
         rows = (
-            self.supabase
-            .table("users")
+            self.supabase.table("users")
             .select("last_billing_end_date")
             .eq("user_id", str(user_id))
             .limit(1)
@@ -114,7 +107,6 @@ class DatabaseManager:
 
         return DateType.fromisoformat(str(raw)[:10])
 
-
     def update_user_last_billing_end_date(
         self,
         user_id: str,
@@ -129,13 +121,11 @@ class DatabaseManager:
         """
 
         (
-            self.supabase
-            .table("users")
+            self.supabase.table("users")
             .update({"last_billing_end_date": last_billing_end_date.isoformat()})
             .eq("user_id", str(user_id))
             .execute()
         )
-
 
     # =============================
     # ENERGY DATA
@@ -156,8 +146,7 @@ class DatabaseManager:
         """
 
         result = (
-            self.supabase
-            .table("energycalculation")
+            self.supabase.table("energycalculation")
             .select("*")
             .eq("user_id", str(user_id))
             .gte("date", cycle_start.isoformat())
@@ -168,8 +157,7 @@ class DatabaseManager:
 
         return getattr(result, "data", None) or []
 
-
-# ── Sprint 2: Stats chart ──────────────────────────────────────
+    # ── Sprint 2: Stats chart ──────────────────────────────────────
     # Added for the Home screen statistics chart (Week/Month/Year).
     # Fetches only the columns needed for chart rendering.
     # Separate from get_current_cycle_energy_rows() to avoid coupling
@@ -188,8 +176,7 @@ class DatabaseManager:
         Used by StatsService to build the statistics chart.
         """
         result = (
-            self.supabase
-            .table("energycalculation")
+            self.supabase.table("energycalculation")
             .select("date, solar_production, total_consumption")
             .eq("user_id", str(user_id))
             .gte("date", start.isoformat())
@@ -198,8 +185,8 @@ class DatabaseManager:
             .execute()
         )
         return getattr(result, "data", None) or []
-    # ── End Sprint 2: Stats chart ──────────────────────────────────
 
+    # ── End Sprint 2: Stats chart ──────────────────────────────────
 
     def get_users_with_energy(self) -> List[str]:
         """
@@ -209,16 +196,10 @@ class DatabaseManager:
         - scheduler jobs
         """
 
-        result = (
-            self.supabase
-            .table("energycalculation")
-            .select("user_id")
-            .execute()
-        )
+        result = self.supabase.table("energycalculation").select("user_id").execute()
 
         rows = getattr(result, "data", None) or []
         return sorted(set(str(r["user_id"]) for r in rows if r.get("user_id")))
-
 
     # =============================
     # BILL PREDICTION TABLE
@@ -233,8 +214,7 @@ class DatabaseManager:
         """
 
         rows = (
-            self.supabase
-            .table("billprediction")
+            self.supabase.table("billprediction")
             .select("*")
             .eq("user_id", str(user_id))
             .order("limit_id", desc=True)
@@ -243,7 +223,6 @@ class DatabaseManager:
         ).data or []
 
         return rows[0] if rows else None
-
 
     def get_bill_row_by_cycle(
         self,
@@ -262,8 +241,7 @@ class DatabaseManager:
         """
 
         rows = (
-            self.supabase
-            .table("billprediction")
+            self.supabase.table("billprediction")
             .select("*")
             .eq("user_id", str(user_id))
             .eq("cycle_start", cycle_start.isoformat())
@@ -272,7 +250,6 @@ class DatabaseManager:
         ).data or []
 
         return rows[0] if rows else None
-
 
     def save_current_cycle_bill(self, user_id: str, payload: Dict[str, Any]) -> int:
         """
@@ -293,8 +270,7 @@ class DatabaseManager:
             limit_id = int(current_row.get("limit_id") or 0)
 
             (
-                self.supabase
-                .table("billprediction")
+                self.supabase.table("billprediction")
                 .update(payload)
                 .eq("limit_id", limit_id)
                 .execute()
@@ -303,24 +279,12 @@ class DatabaseManager:
             return limit_id
 
         # ---- INSERT NEW ROW ----
-        result = (
-            self.supabase
-            .table("billprediction")
-            .insert(payload)
-            .execute()
-        )
+        result = self.supabase.table("billprediction").insert(payload).execute()
 
         data = getattr(result, "data", None) or []
         return int(data[0].get("limit_id") or 0) if data else 0
-    
-    
-    
 
-
-
-
-
- # =========================================================
+    # =========================================================
     # USERS (new)
     # ---------------------------------------------------------
     # NOTE: For reading the user profile, we reuse the existing
@@ -354,7 +318,9 @@ class DatabaseManager:
     # DEVICES (new — only what recommendation logic needs)
     # =========================================================
 
-    def get_devices_by_type(self, user_id: str, device_type: str) -> List[Dict[str, Any]]:
+    def get_devices_by_type(
+        self, user_id: str, device_type: str
+    ) -> List[Dict[str, Any]]:
         response = (
             self.supabase.table("device")
             .select("*")
@@ -517,6 +483,7 @@ class DatabaseManager:
         )
         data = response.data or []
         return data[0] if data else None
+
     # =========================================================
     # REAL-TIME DEVICE UPDATE (new)
     # ---------------------------------------------------------
@@ -528,7 +495,9 @@ class DatabaseManager:
         """Get a single device row by device_id."""
         response = (
             self.supabase.table("device")
-            .select("device_id, device_type, consumption, production, total_energy, total_energy_daily, last_reading_at, is_on")
+            .select(
+                "device_id, device_type, consumption, production, total_energy, total_energy_daily, last_reading_at, is_on"
+            )
             .eq("device_id", device_id)
             .limit(1)
             .execute()
@@ -547,14 +516,18 @@ class DatabaseManager:
         Payload contains: consumption/production, is_on,
         total_energy_daily, total_energy, last_reading_at
         """
-        self.supabase.table("device").update(payload).eq("device_id", device_id).execute()
+        self.supabase.table("device").update(payload).eq(
+            "device_id", device_id
+        ).execute()
 
     def reset_all_daily_energy(self) -> None:
         """
         Reset total_energy_daily to 0 for ALL devices.
         Called by the midnight scheduler job every day.
         """
-        self.supabase.table("device").update({"total_energy_daily": 0}).neq("device_id", 0).execute()
+        self.supabase.table("device").update({"total_energy_daily": 0}).neq(
+            "device_id", 0
+        ).execute()
 
     def get_user_devices_realtime(self, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -563,12 +536,15 @@ class DatabaseManager:
         """
         response = (
             self.supabase.table("device")
-            .select("device_id, device_name, device_type, consumption, production, is_on, total_energy_daily, total_energy, last_reading_at")
+            .select(
+                "device_id, device_name, device_type, consumption, production, is_on, total_energy_daily, total_energy, last_reading_at"
+            )
             .eq("user_id", user_id)
             .order("device_id")
             .execute()
         )
         return response.data or []
+
     # =========================================================
     # ENERGY CALCULATION — Daily UPSERT (new)
     # ---------------------------------------------------------
@@ -601,7 +577,7 @@ class DatabaseManager:
             rows = response.data or []
 
             total_consumption = 0.0
-            solar_production  = 0.0
+            solar_production = 0.0
 
             for row in rows:
                 kwh = float(row.get("total_energy_daily") or 0.0)
@@ -612,7 +588,7 @@ class DatabaseManager:
 
             return {
                 "total_consumption": round(total_consumption, 6),
-                "solar_production":  round(solar_production, 6),
+                "solar_production": round(solar_production, 6),
             }
         except Exception:
             return {"total_consumption": 0.0, "solar_production": 0.0}
@@ -629,17 +605,18 @@ class DatabaseManager:
         Uses manual check: if row exists → UPDATE, else → INSERT.
         """
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
             payload = {
-                "user_id":           user_id,
-                "date":              date_str,
+                "user_id": user_id,
+                "date": date_str,
                 "total_consumption": total_consumption,
-                "solar_production":  solar_production,
-                "total_cost":        round(total_consumption * 0.18, 4),
-                "carbon_reduction":  round(solar_production * 0.568, 6),
-                "cost_savings":      round(solar_production * 0.18, 4),
+                "solar_production": solar_production,
+                "total_cost": round(total_consumption * 0.18, 4),
+                "carbon_reduction": round(solar_production * 0.568, 6),
+                "cost_savings": round(solar_production * 0.18, 4),
             }
 
             # Check if row exists for this user + date
@@ -656,16 +633,189 @@ class DatabaseManager:
             if rows:
                 # UPDATE existing row
                 calc_id = rows[0]["calculation_id"]
-                self.supabase.table("energycalculation").update({
-                    "total_consumption": total_consumption,
-                    "solar_production":  solar_production,
-                    "total_cost":        round(total_consumption * 0.18, 4),
-                    "carbon_reduction":  round(solar_production * 0.568, 6),
-                    "cost_savings":      round(solar_production * 0.18, 4),
-                }).eq("calculation_id", calc_id).execute()
+                self.supabase.table("energycalculation").update(
+                    {
+                        "total_consumption": total_consumption,
+                        "solar_production": solar_production,
+                        "total_cost": round(total_consumption * 0.18, 4),
+                        "carbon_reduction": round(solar_production * 0.568, 6),
+                        "cost_savings": round(solar_production * 0.18, 4),
+                    }
+                ).eq("calculation_id", calc_id).execute()
             else:
                 # INSERT new row
                 self.supabase.table("energycalculation").insert(payload).execute()
 
         except Exception as e:
-            logging.getLogger(__name__).error(f"upsert_energy_calculation failed for {user_id}: {e}")
+            logging.getLogger(__name__).error(
+                f"upsert_energy_calculation failed for {user_id}: {e}"
+            )
+
+    # ═══════════════════════════════════════════════════════════════
+    # SOLAR FORECAST — Sprint 2
+    # ---------------------------------------------------------------
+    # days_offline logic updated:
+    #   1. Check energycalculation for today's solar_production
+    #   2. If 0 or missing → get latest last_reading_at across ALL
+    #      production devices for the user
+    #   3. Use that timestamp to compute days_offline
+    # ═══════════════════════════════════════════════════════════════
+
+    def get_user_location(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Return location, latitude, longitude for a user.
+        Used by SolarForecastService to determine city and GHI region.
+        """
+        rows = (
+            self.supabase.table("users")
+            .select("location, latitude, longitude")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        ).data or []
+        return rows[0] if rows else None
+
+    def get_production_device(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Return the first production device for a user.
+        Used to get panel_capacity and installation_date.
+        Returns dict with: device_id, panel_capacity, installation_date.
+        """
+        rows = (
+            self.supabase.table("device")
+            .select("device_id, panel_capacity, installation_date")
+            .eq("user_id", user_id)
+            .eq("device_type", "production")
+            .limit(1)
+            .execute()
+        ).data or []
+        return rows[0] if rows else None
+
+    def get_all_production_devices(self) -> List[Dict[str, Any]]:
+        """
+        Return all production devices across all users.
+        Used by DeviceMonitor.run() for the daily check.
+        Returns distinct user_ids with their devices.
+        """
+        return (
+            self.supabase.table("device")
+            .select("device_id, user_id, installation_date")
+            .eq("device_type", "production")
+            .execute()
+        ).data or []
+
+    def get_production_devices_by_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Return all production devices for a specific user.
+        Used by DeviceMonitor.check_user().
+        """
+        return (
+            self.supabase.table("device")
+            .select("device_id, user_id, installation_date")
+            .eq("user_id", user_id)
+            .eq("device_type", "production")
+            .execute()
+        ).data or []
+
+    def get_latest_production_reading(self, user_id: str) -> Optional[str]:
+        """
+        Return the most recent last_reading_at across ALL production
+        devices for a user.
+
+        Why across all devices:
+          A user may have multiple solar panels. If one panel has a wiring
+          issue, last_reading_at of other panels would still be recent.
+          We use the LATEST reading across all devices — if even one device
+          sent a reading today, days_offline = 0.
+          The actual decision is based on last_reading_at, not is_on,
+          because is_on can be True while a wiring issue causes 0 production.
+
+        Returns ISO timestamp string, or None if no readings exist.
+        """
+        rows = (
+            self.supabase.table("device")
+            .select("last_reading_at")
+            .eq("user_id", user_id)
+            .eq("device_type", "production")
+            .not_.is_("last_reading_at", "null")
+            .order("last_reading_at", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        return rows[0]["last_reading_at"] if rows else None
+
+    def get_today_solar_production(
+        self,
+        user_id: str,
+        today: "DateType",
+    ) -> float:
+        """
+        Return today's solar_production from energycalculation.
+        Returns 0.0 if no row exists for today.
+
+        Used as the first check in DeviceMonitor:
+          if solar_production == 0.0 today → possible device issue
+          → proceed to check last_reading_at
+        """
+        rows = (
+            self.supabase.table("energycalculation")
+            .select("solar_production")
+            .eq("user_id", user_id)
+            .eq("date", today.isoformat())
+            .limit(1)
+            .execute()
+        ).data or []
+        if not rows:
+            return 0.0
+        return float(rows[0].get("solar_production") or 0.0)
+
+    def get_season_energy_rows(
+        self,
+        user_id: str,
+        start: "DateType",
+        end: "DateType",
+    ) -> List[Dict[str, Any]]:
+        """
+        Return energycalculation rows with solar_production > 0
+        within a date range (inclusive).
+        Used by SolarForecastService to count collected days.
+        """
+        return (
+            self.supabase.table("energycalculation")
+            .select("date, solar_production")
+            .eq("user_id", user_id)
+            .gte("date", start.isoformat())
+            .lte("date", end.isoformat())
+            .gt("solar_production", 0)
+            .execute()
+        ).data or []
+
+    def check_notification_exists(
+        self,
+        user_id: str,
+        notif_type: str,
+        key: str,
+    ) -> bool:
+        """
+        Check if a notification with the given dedup key already exists.
+        Uses ilike() — avoids filtering on 'timestamp' (PostgreSQL reserved).
+        See Change Log v4, Section 3.16.
+        """
+        try:
+            res = (
+                self.supabase.table("notification")
+                .select("notification_type")
+                .eq("user_id", user_id)
+                .eq("notification_type", notif_type)
+                .ilike("content", f"%{key}%")
+                .limit(1)
+                .execute()
+            )
+            return len(res.data or []) > 0
+        except Exception:
+            return False
+
+
+# ═══════════════════════════════════════════════════════════════
+# END SOLAR FORECAST — Sprint 2
+# ═══════════════════════════════════════════════════════════════
