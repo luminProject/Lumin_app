@@ -129,6 +129,15 @@ class _LoginPageState extends State<LoginPage> {
       );
     } on AuthException catch (e) {
       _showMessage(_friendlyLoginError(e));
+    } on Exception catch (e) {
+      final msg = e.toString();
+      if (msg.contains('SocketException') || msg.contains('network') || msg.contains('connection')) {
+        _showMessage('No internet connection. Please check your network and try again.');
+      } else if (msg.contains('TimeoutException') || msg.contains('timeout')) {
+        _showMessage('Request timed out. Please try again.');
+      } else {
+        _showMessage('Something went wrong. Please try again.');
+      }
     } catch (_) {
       _showMessage('Something went wrong. Please try again.');
     } finally {
@@ -156,18 +165,25 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
 
-      // ✅ Safe & professional (prevents email enumeration)
       _showMessage(
         'If this email is registered, a password reset link has been sent.',
         isError: false,
       );
     } on AuthException catch (e) {
       final m = e.message.toLowerCase();
-
       if (m.contains('too many requests')) {
         _showMessage('Too many requests. Please wait and try again.');
       } else {
         _showMessage('Could not send reset email. Please try again.');
+      }
+    } on Exception catch (e) {
+      final msg = e.toString();
+      if (msg.contains('SocketException') || msg.contains('network') || msg.contains('connection')) {
+        _showMessage('No internet connection. Please check your network and try again.');
+      } else if (msg.contains('TimeoutException') || msg.contains('timeout')) {
+        _showMessage('Request timed out. Please try again.');
+      } else {
+        _showMessage('Something went wrong. Please try again.');
       }
     } catch (_) {
       _showMessage('Something went wrong. Please try again.');

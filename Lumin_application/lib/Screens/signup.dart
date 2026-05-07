@@ -250,13 +250,35 @@ class _SignupPageState extends State<SignupPage> {
       final msg = e.message.toLowerCase();
       if (msg.contains('already') || msg.contains('registered') || msg.contains('exists')) {
         _showMessage('This email is already registered. Please use another email.');
+      } else if (msg.contains('too many requests')) {
+        _showMessage('Too many attempts. Please wait a moment and try again.');
+      } else if (msg.contains('weak password')) {
+        _showMessage('Password is too weak. Please use a stronger password.');
       } else {
-        _showMessage(e.message);
+        _showMessage('Sign up failed. Please try again.');
       }
     } on PostgrestException catch (e) {
-      _showMessage(e.message);
-    } catch (e) {
-      _showMessage(e.toString().replaceFirst('Exception: ', ''));
+      final msg = e.message.toLowerCase();
+      if (msg.contains('duplicate') || msg.contains('unique')) {
+        _showMessage('An account with this information already exists.');
+      } else if (msg.contains('network') || msg.contains('connection')) {
+        _showMessage('Connection error. Please check your internet and try again.');
+      } else {
+        _showMessage('Could not save your information. Please try again.');
+      }
+    } on Exception catch (e) {
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      if (msg.contains('Location') || msg.contains('location') || msg.contains('permission')) {
+        _showMessage(msg);
+      } else if (msg.contains('SocketException') || msg.contains('network') || msg.contains('connection')) {
+        _showMessage('No internet connection. Please check your network and try again.');
+      } else if (msg.contains('TimeoutException') || msg.contains('timeout')) {
+        _showMessage('Request timed out. Please try again.');
+      } else {
+        _showMessage('Something went wrong. Please try again.');
+      }
+    } catch (_) {
+      _showMessage('Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
