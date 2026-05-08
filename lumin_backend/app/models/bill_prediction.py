@@ -6,6 +6,11 @@ from datetime import date as DateType, timedelta
 
 from zoneinfo import ZoneInfo
 import datetime
+
+
+class BillValidationError(ValueError):
+    """Raised when bill input is invalid."""
+    pass    
 @dataclass
 class BillPrediction:
     _user_id: str
@@ -18,8 +23,8 @@ class BillPrediction:
     _predicted_usage_kwh: float = 0.0
     _forecast_available: bool = False
 
-    _days_passed: int = 0
-    _days_in_month: int = 30
+    
+    _DAYS_IN_CYCLE: int = 30
 
     _limit_id: int = 0
     _last_checkpoint_day: int | None = None
@@ -60,20 +65,20 @@ class BillPrediction:
         Validate and set user bill limit.
         """
         if limit is None:
-            raise ValueError("Please enter your monthly bill limit.")
+            raise BillValidationError("Please enter your monthly bill limit.")
 
         try:
             limit = float(limit)
         except (TypeError, ValueError):
-            raise ValueError("Bill limit must be a number.")
+            raise BillValidationError("Bill limit must be a number.")
 
         if limit <= 0:
-            raise ValueError("Bill limit must be greater than 0.")
+            raise BillValidationError("Bill limit must be greater than 0.")
         if limit < 10:
-            raise ValueError("Bill limit must be at least 10 SAR.")
+            raise BillValidationError("Bill limit must be at least 10 SAR.")
 
         if limit > 10_000:
-            raise ValueError("Bill limit cannot exceed 10,000 SAR.")
+            raise BillValidationError("Bill limit cannot exceed 10,000 SAR.")
 
         self._limit_amount = limit
 
@@ -83,7 +88,10 @@ class BillPrediction:
         - 0.18 SAR for the first 6000 kWh
         - 0.30 SAR for usage above 6000 kWh
         """
-        consumption = max(float(consumption), 0.0)
+        try:
+            consumption = max(float(consumption), 0.0)
+        except (TypeError, ValueError):
+            raise BillValidationError("Consumption must be a number.")
 
         if consumption <= 6000:
             return round(consumption * 0.18, 2)
@@ -94,13 +102,13 @@ class BillPrediction:
 
         return round(first_tier_bill + second_tier_bill, 2)
 
-    def PredictBill(self, bill_data: dict | None) -> int | None:
+    def PredictBill(self, usage_data: dict | None) -> int | None:
         # =========================
         # 1) VALIDATION
         # =========================
 
         # If no data is provided OR billing cycle start is missing → cannot proceed
-        if bill_data is None or self._cycle_start is None:
+        if usage_data is None or self._cycle_start is None:
             return None
 
         # Get today's date using Saudi Arabia timezone
@@ -113,7 +121,7 @@ class BillPrediction:
         # Stop if:
         # - No full day has passed
         # - Cycle is already finished
-        if completed_days <= 0 or completed_days > self._days_in_month:
+        if completed_days <= 0 or completed_days > self._DAYS_IN_CYCLE:
             return None
 
         # Get the last processed checkpoint (to avoid duplicates)
@@ -141,10 +149,10 @@ class BillPrediction:
         # =========================
 
         # Extract daily dates from input
-        daily_dates = bill_data.get("daily_dates") or []
+        daily_dates = usage_data.get("daily_dates") or []
 
         # Extract daily net usage values (consumption - solar)
-        daily_values = bill_data.get("daily_net_values") or []
+        daily_values = usage_data.get("daily_net_values") or []
 
         # If missing data → cannot calculate
         if not daily_dates or not daily_values:
@@ -170,7 +178,7 @@ class BillPrediction:
                 # Prevent negative values
                 value = max(float(raw_value or 0.0), 0.0)
 
-            except Exception:
+            except (ValueError, TypeError):
                 # Skip invalid records
                 continue
 
@@ -256,7 +264,7 @@ class BillPrediction:
         # =========================
 
         # Remaining days in the billing cycle
-        remaining_days = max(self._days_in_month - checkpoint_day, 0)
+        remaining_days = max(self._DAYS_IN_CYCLE - checkpoint_day, 0)
 
         # Predict total usage:
         # actual usage + (average × remaining days)
@@ -283,7 +291,7 @@ class BillPrediction:
         # =========================
 
         return checkpoint_day
-    def compareActualWithPredicted(self) -> int:
+    def is_predicted_bill_over_limit(self) -> int:
         """
         Compare predicted bill with user limit.
 
@@ -299,16 +307,11 @@ class BillPrediction:
 
         return 1 if self._predicted_bill + 10 >= self._limit_amount else 0
 
-    def load_and_sync_state(
-        self,
-        db_row: dict | None,
-        live_data: dict | None = None,
-        cycle_start: DateType | None = None,
-    ) -> None:
+    def load_and_sync_state( self,bill_row: dict | None,usage_data: dict | None = None, cycle_start: DateType | None = None,  ) -> None:
         """
         Load saved DB state and sync current live usage.
 
-        db_row can be:
+        bill_row can be:
         - a full billprediction row for current cycle
         - or {"limit_amount": ...} carried from previous cycle
         """
@@ -319,24 +322,22 @@ class BillPrediction:
         self._cycle_start = cycle_start
 
         # For GET /bill display, include today's current/live usage.
-        # This is UI state, not scheduler checkpoint state.
-        if self._cycle_start is not None:
-            self._days_passed = max((today - self._cycle_start).days + 1, 0)
+   
+ 
+        if bill_row:
+            self._limit_id = int(bill_row.get("limit_id") or 0)
+            self._limit_amount = float(bill_row.get("limit_amount") or 0.0)
+            self._predicted_bill = float(bill_row.get("predicted_bill") or 0.0)
+            self._predicted_usage_kwh = float(bill_row.get("predicted_usage_kwh") or 0.0)
+            self._forecast_available = bool(bill_row.get("forecast_available") or False)
+            self._last_checkpoint_day = bill_row.get("last_checkpoint_day")
 
-        if db_row:
-            self._limit_id = int(db_row.get("limit_id") or 0)
-            self._limit_amount = float(db_row.get("limit_amount") or 0.0)
-            self._predicted_bill = float(db_row.get("predicted_bill") or 0.0)
-            self._predicted_usage_kwh = float(db_row.get("predicted_usage_kwh") or 0.0)
-            self._forecast_available = bool(db_row.get("forecast_available") or False)
-            self._last_checkpoint_day = db_row.get("last_checkpoint_day")
+            if self._cycle_start is None and bill_row.get("cycle_start"):
+                self._cycle_start = DateType.fromisoformat(str(bill_row.get("cycle_start"))[:10])
+                
 
-            if self._cycle_start is None and db_row.get("cycle_start"):
-                self._cycle_start = DateType.fromisoformat(str(db_row.get("cycle_start"))[:10])
-                self._days_passed = max((today - self._cycle_start).days + 1, 0)
-
-        if isinstance(live_data, dict):
-            self._actual_usage_kwh = float(live_data.get("current_usage_kwh") or 0.0)
+        if isinstance(usage_data, dict):
+            self._actual_usage_kwh = float(usage_data.get("current_usage_kwh") or 0.0)
             self._actual_bill = self.calculateBill(self._actual_usage_kwh)
 
     def build_db_payload(self) -> dict:
@@ -356,8 +357,6 @@ class BillPrediction:
             "current_usage_kwh": round(self._actual_usage_kwh, 2),
             "predicted_usage_kwh": round(self._predicted_usage_kwh, 2),
             "forecast_available": self._forecast_available,
-            "days_passed": self._days_passed,
-            "days_in_month": self._days_in_month,
             "last_checkpoint_day": self._last_checkpoint_day,
         }
 
@@ -371,12 +370,10 @@ class BillPrediction:
             "limit_amount": self._limit_amount if self._limit_amount > 0 else None,
             "actual_bill": round(self._actual_bill, 2),
             "predicted_bill": round(self._predicted_bill, 2),
-            "limit_warning": self.compareActualWithPredicted() == 1,
+            "limit_warning": self.is_predicted_bill_over_limit() == 1,
             "current_usage_kwh": round(self._actual_usage_kwh, 2),
             "predicted_usage_kwh": round(self._predicted_usage_kwh, 2),
             "forecast_available": self._forecast_available,
-            "days_passed": self._days_passed,
-            "days_in_month": self._days_in_month,
             "last_checkpoint_day": self._last_checkpoint_day,
             "cycle_start": self._cycle_start.isoformat() if self._cycle_start else None,
             "setup_required": False,

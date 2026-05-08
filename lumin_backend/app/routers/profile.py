@@ -4,13 +4,11 @@ from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
-from app.core.lumin_facade import ProfileValidationError
+from app.core.lumin_facade import ProfileValidationError, LuminFacade
 from app.supabase_client import (
     verify_user_access,
-    extract_bearer,
     get_supabase_for_jwt,
 )
-from app.core.lumin_facade import LuminFacade
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -29,17 +27,17 @@ class ProfileOut(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    username: Optional[str] = None
-    phone_number: Optional[str] = None
-    location: Optional[str] = None
-    avatar_url: Optional[str] = None
+    username: Optional[str] = Field(default=None, min_length=3, max_length=50)
+    phone_number: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    location: Optional[str] = Field(default=None, max_length=100)
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
     energy_source: Optional[str] = Field(
         default=None,
-        description="Grid only or Grid + Solar",
+        pattern=r"^(Grid only|Grid \+ Solar)$",
     )
     has_solar_panels: Optional[bool] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
     last_billing_end_date: Optional[date] = None
 
 
@@ -49,9 +47,7 @@ def get_profile(
     authorization: Optional[str] = Header(None),
 ):
     try:
-        verify_user_access(user_id, authorization)
-
-        jwt = extract_bearer(authorization)
+        jwt = verify_user_access(user_id, authorization)
         user_supabase = get_supabase_for_jwt(jwt)
         facade = LuminFacade(user_supabase)
 
@@ -61,11 +57,13 @@ def get_profile(
         raise
     except ProfileValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
     except ValueError:
         raise HTTPException(status_code=404, detail="Profile not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load profile right now.",
+        )
 
 
 @router.patch("/{user_id}", response_model=ProfileOut)
@@ -75,14 +73,11 @@ def update_profile(
     authorization: Optional[str] = Header(None),
 ):
     try:
-        verify_user_access(user_id, authorization)
-
-        jwt = extract_bearer(authorization)
+        jwt = verify_user_access(user_id, authorization)
         user_supabase = get_supabase_for_jwt(jwt)
         facade = LuminFacade(user_supabase)
 
         info = payload.model_dump(exclude_none=True)
-
 
         return facade.update_profile(user_id, info)
 
@@ -90,8 +85,10 @@ def update_profile(
         raise
     except ProfileValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
     except ValueError:
         raise HTTPException(status_code=404, detail="Profile not found")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to update profile right now.",
+        )

@@ -253,36 +253,30 @@ class DatabaseManager:
 
     def save_current_cycle_bill(self, user_id: str, payload: Dict[str, Any]) -> int:
         """
-        Save billprediction row for CURRENT cycle.
+        Save billprediction row for the current billing cycle.
 
-        Logic:
-        1. Check if row exists for same user + cycle_start
-        2. If yes → UPDATE
-        3. If no  → INSERT new row
+        One row is allowed per user + cycle_start.
+        If it exists, update it.
+        If not, insert it.
         """
 
-        cycle_start = DateType.fromisoformat(str(payload["cycle_start"])[:10])
+        payload["user_id"] = user_id
 
-        current_row = self.get_bill_row_by_cycle(user_id, cycle_start)
-
-        # ---- UPDATE EXISTING ROW ----
-        if current_row:
-            limit_id = int(current_row.get("limit_id") or 0)
-
-            (
-                self.supabase.table("billprediction")
-                .update(payload)
-                .eq("limit_id", limit_id)
-                .execute()
+        result = (
+            self.supabase
+            .table("billprediction")
+            .upsert(
+                payload,
+                on_conflict="user_id,cycle_start"
             )
-
-            return limit_id
-
-        # ---- INSERT NEW ROW ----
-        result = self.supabase.table("billprediction").insert(payload).execute()
+            .execute()
+        )
 
         data = getattr(result, "data", None) or []
-        return int(data[0].get("limit_id") or 0) if data else 0
+        return int(data[0].get("limit_id") or 0) if data else 0  
+        
+    
+
 
     # =========================================================
     # USERS (new)

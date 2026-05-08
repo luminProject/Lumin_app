@@ -97,4 +97,4 @@ def verify_user_access(
     if token_user_id != str(user_id):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    return token_user_id
+    return jwt

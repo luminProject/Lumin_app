@@ -35,7 +35,8 @@ import supabase as supabase_
 from app.models.solar_forecast_service import SolarForecastService
 from app.models.energy_calculation import EnergyCalculation
 from app.tasks.device_monitor import DeviceMonitor
-
+from app.core.lumin_facade import LuminFacade, BillingDateRequiredError
+from app.models.bill_prediction import BillValidationError
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ async def lifespan(app: FastAPI):
 
     # Bill scheduler
     setup_scheduler(admin_facade)
-    logger.info("✅ Bill scheduler started.")
+    
 
     yield  # Server is running
 
@@ -98,7 +99,7 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Recommendation scheduler stopped.")
 
     shutdown_scheduler()
-    logger.info("🛑 Bill scheduler stopped.")
+    
 
 
 app = FastAPI(title="LUMIN Backend", lifespan=lifespan)
@@ -363,8 +364,8 @@ def get_my_current_bill(
     authorization: Optional[str] = Header(None),
 ):
     try: 
-        verify_user_access(user_id, authorization)
-        jwt = extract_bearer(authorization)
+        
+        jwt = verify_user_access(user_id, authorization)
         user_supabase = get_supabase_for_jwt(jwt)
         bill_facade = LuminFacade(user_supabase)
 
@@ -375,10 +376,11 @@ def get_my_current_bill(
 
     except HTTPException:
         raise
-    except ValueError as e:
+    except BillingDateRequiredError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except BillValidationError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/bill/{user_id}")
@@ -388,8 +390,8 @@ def set_bill_limit(
     authorization: Optional[str] = Header(None),
 ):
     try:
-        verify_user_access(user_id, authorization)
-        jwt = extract_bearer(authorization)
+        
+        jwt = verify_user_access(user_id, authorization)
         user_supabase = get_supabase_for_jwt(jwt)
         bill_facade = LuminFacade(user_supabase)
         bill_facade.set_bill_limit(user_id, payload.limit_amount)
@@ -401,10 +403,11 @@ def set_bill_limit(
 
     except HTTPException:
         raise
-    except ValueError as e:
+    except BillingDateRequiredError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except BillValidationError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/internal/run-bill-checkpoint")
 def run_bill_checkpoint():
     try:
@@ -412,11 +415,13 @@ def run_bill_checkpoint():
             "status": "success",
             "data": admin_facade.run_bill_checkpoint_for_all_users()
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
- 
-
-
+    
+    except HTTPException:
+        raise
+    except BillingDateRequiredError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except BillValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 # -----------------------------
 # Solar Forecast Endpoint
 # -----------------------------

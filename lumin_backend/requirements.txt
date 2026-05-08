@@ -6,3 +6,4 @@ pyjwt
 cryptography
 apscheduler
 firebase-admin
+pytest

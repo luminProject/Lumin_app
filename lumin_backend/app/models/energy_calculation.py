@@ -111,56 +111,57 @@ class EnergyCalculation(Observer):
             anchor=anchor,
         )
 
-    # ── Bill prediction helper ─────────────────────────────────
+    # ── Bill prediction  ─────────────────────────────────
     # Called by LuminFacade for billing cycle calculations.
 
-    def get_current_month_usage(self, rows: list[dict] | None = None) -> dict:
+    def get_cycle_usage_summary (self, energy_rows: list[dict] | None = None) -> dict:
         """
-        Transform raw energy rows into a monthly usage summary for bill prediction.
+        Business logic only.
 
-        Rows are pre-filtered by billing cycle (not calendar month).
+        The method name is kept to avoid breaking existing code.
+        However, rows are now already filtered by billing cycle, not calendar month.
         """
-        today        = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
-        days_in_month = 30
+        today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
 
-        if not rows:
+    
+
+        if not energy_rows:
             return {
-                "user_id":           str(self.user_id),
-                "energy_id":         self.Energy_id,
-                "date":              today.isoformat(),
-                "days_in_month":     days_in_month,
-                "daily_net_values":  [],
-                "daily_dates":       [],
+                "user_id": str(self.user_id),
+                "energy_id": self.Energy_id,
+                "date": today.isoformat(),
+                "daily_net_values": [],
+                "daily_dates": [],
                 "current_usage_kwh": 0.0,
             }
 
         daily_map: dict[str, float] = {}
 
-        for row in rows:
+        for row in energy_rows:
             row_date = row.get("date")
             if not row_date:
                 continue
 
-            day_str          = str(row_date)[:10]
+            day_str = str(row_date)[:10]
             daily_consumption = float(row.get("total_consumption") or 0.0)
-            daily_solar       = float(row.get("solar_production")  or 0.0)
+            daily_solar = float(row.get("solar_production") or 0.0)
 
-            # Net grid usage used by bill prediction
-            daily_grid = max(daily_consumption - daily_solar, 0.0)
-            daily_map[day_str] = daily_map.get(day_str, 0.0) + daily_grid
+            # Net grid usage used later by bill prediction.
+            daily_grid_consumption = max(daily_consumption - daily_solar, 0.0)
 
-        sorted_days       = sorted(daily_map.keys())
-        daily_net_values  = [round(daily_map[day], 2) for day in sorted_days]
+            daily_map[day_str] = daily_map.get(day_str, 0.0) + daily_grid_consumption
+
+        sorted_days = sorted(daily_map.keys())
+        daily_net_values = [round(daily_map[day], 2) for day in sorted_days]
         current_usage_kwh = round(sum(daily_net_values), 2)
 
         self.total_consumption = current_usage_kwh
 
         return {
-            "user_id":           str(self.user_id),
-            "energy_id":         self.Energy_id,
-            "date":              today.isoformat(),
-            "days_in_month":     days_in_month,
-            "daily_net_values":  daily_net_values,
-            "daily_dates":       sorted_days,
+            "user_id": str(self.user_id),
+            "energy_id": self.Energy_id,
+            "date": today.isoformat(),
+            "daily_net_values": daily_net_values,
+            "daily_dates": sorted_days,
             "current_usage_kwh": current_usage_kwh,
         }
