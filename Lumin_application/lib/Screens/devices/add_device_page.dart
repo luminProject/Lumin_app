@@ -72,9 +72,10 @@ class _AddDevicePageState extends State<AddDevicePage> {
         final type = (result['device_type'] ?? result['type'] ?? '')
             .toString()
             .trim();
-        final panelCapacity = (result['panel_capacity'] ?? '')
-            .toString()
-            .trim();
+        final panelCapacityValue = result['panel_capacity'];
+        final double? panelCapacity = panelCapacityValue is num
+            ? panelCapacityValue.toDouble()
+            : double.tryParse((panelCapacityValue ?? '').toString().trim());
         final room = (result['room'] ?? '').toString().trim();
         final isShiftable = result['is_shiftable'] == true;
 
@@ -88,7 +89,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
         await _apiService.addDevice(
           deviceName: name,
           deviceType: normalizedType,
-          panelCapacity: panelCapacity.isEmpty ? null : panelCapacity,
+          panelCapacity: panelCapacity,
           room: room.isEmpty ? null : room,
           isShiftable: normalizedType == 'consumption' ? isShiftable : false,
         );

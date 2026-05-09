@@ -132,11 +132,16 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     final updatedName = (updated['device_name'] ?? d.name).toString().trim();
     final updatedType = (updated['device_type'] ?? d.value).toString().trim();
     final updatedRoom = updated['room']?.toString();
-    final updatedCapacity = (updated['panel_capacity'] ?? '').toString().trim();
+    final updatedCapacityValue = updated['panel_capacity'];
+    final double? updatedCapacity = updatedCapacityValue is num
+        ? updatedCapacityValue.toDouble()
+        : double.tryParse((updatedCapacityValue ?? '').toString().trim());
 
     final updatedValue = updatedType == 'production'
-        ? (updatedCapacity.isEmpty ? d.value : updatedCapacity)
-        : updatedType;
+        ? (updatedCapacity == null
+              ? d.value
+              : '${updatedCapacity.toStringAsFixed(2)} kW')
+        : d.value;
 
     try {
       await _apiService.updateDeviceSettings(

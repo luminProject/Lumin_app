@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lumin_application/Widgets/gradient_background.dart';
 import 'package:lumin_application/theme/app_colors.dart';
 
@@ -159,13 +160,27 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
   void _finishSetup() {
     final bool isSolarPanel = _deviceType == 'production';
     final deviceName = _nameCtrl.text.trim();
+    final capacityText = _capacityCtrl.text.trim();
+    double? panelCapacity;
+
+    if (isSolarPanel && capacityText.isNotEmpty) {
+      panelCapacity = double.tryParse(capacityText);
+      if (panelCapacity == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Panel capacity must contain numbers only.'),
+          ),
+        );
+        return;
+      }
+    }
 
     final payload = {
       "device_id": widget.deviceDbId,
       "device_name": deviceName,
       "device_type": _deviceType,
       "room": _deviceType == 'production' ? null : _selectedRoom,
-      "panel_capacity": isSolarPanel ? _capacityCtrl.text.trim() : null,
+      "panel_capacity": isSolarPanel ? panelCapacity : null,
       "is_shiftable": _deviceType == 'consumption' ? _isShiftable : false,
     };
 
@@ -498,7 +513,12 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                   const SizedBox(height: 10),
                   TextField(
                     controller: _capacityCtrl,
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                    ],
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,

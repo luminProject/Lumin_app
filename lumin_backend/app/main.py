@@ -169,7 +169,7 @@ class DeviceUpdate(BaseModel):
     name: str
     device_type: str
     room: str | None = None
-    panel_capacity: str | None = None
+    panel_capacity: float | None = None
 
 
 # -----------------------------

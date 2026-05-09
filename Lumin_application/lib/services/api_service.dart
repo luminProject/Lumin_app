@@ -70,7 +70,7 @@ class ApiService {
   Future<void> addDevice({
     required String deviceName,
     required String deviceType,
-    String? panelCapacity,
+    double? panelCapacity,
     String? room,
     bool isShiftable = false,
   }) async {
@@ -107,7 +107,7 @@ class ApiService {
     required String deviceName,
     required String deviceType,
     String? room,
-    String? panelCapacity,
+    double? panelCapacity,
   }) async {
     final body = {
       'name': deviceName,
