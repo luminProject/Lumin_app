@@ -63,33 +63,37 @@ class Recommendation:
         Build a solar recommendation from raw sensor readings.
         Returns True if successful, False if data is insufficient.
         """
-        avg_by_period = self._average_kwh_by_period(solar_rows)
-        if not avg_by_period:
+        try:
+            avg_by_period = self._average_kwh_by_period(solar_rows)
+            if not avg_by_period:
+                return False
+
+            best_period, best_avg = self._find_best_period(avg_by_period)
+            if best_period is None:
+                return False
+
+            self._best_period = best_period
+            self._best_period_avg = best_avg
+            self._period_averages = avg_by_period
+
+            matched = None
+            if shiftable_devices:
+                matched = self._choose_closest_device(
+                    devices=shiftable_devices,
+                    target_period=best_period,
+                    target_kwh=best_avg,
+                    device_readings_by_id=device_readings_by_id,
+                )
+
+            self._matched_device = matched
+            if matched:
+                self.device_id = matched["device_id"]
+
+            self.recommendation_text = self._build_text(best_period, matched)
+            return True
+
+        except Exception:
             return False
-
-        best_period, best_avg = self._find_best_period(avg_by_period)
-        if best_period is None:
-            return False
-
-        self._best_period = best_period
-        self._best_period_avg = best_avg
-        self._period_averages = avg_by_period
-
-        matched = None
-        if shiftable_devices:
-            matched = self._choose_closest_device(
-                devices=shiftable_devices,
-                target_period=best_period,
-                target_kwh=best_avg,
-                device_readings_by_id=device_readings_by_id,
-            )
-
-        self._matched_device = matched
-        if matched:
-            self.device_id = matched["device_id"]
-
-        self.recommendation_text = self._build_text(best_period, matched)
-        return True
 
     def buildFromGeneralText(self, general_text: str) -> None:
         """Set the recommendation text from a general (DB-stored) tip."""

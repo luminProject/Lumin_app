@@ -39,23 +39,27 @@ class Notification:
         if self.supabase is None:
             return "notification_not_sent"
 
-        result = (
-            self.supabase
-            .table("notification")
-            .insert({
-                "user_id": self.user_id,
-                "content": self.content,
-                "notification_type": self.notification_type,
-                "timestamp": self.timestamp.isoformat(),
-            })
-            .execute()
-        )
+        try:
+            result = (
+                self.supabase
+                .table("notification")
+                .insert({
+                    "user_id": self.user_id,
+                    "content": self.content,
+                    "notification_type": self.notification_type,
+                    "timestamp": self.timestamp.isoformat(),
+                })
+                .execute()
+            )
 
-        data = getattr(result, "data", None) or []
-        if data:
-            self.notification_id = int(data[0].get("notification_id") or 0)
+            data = getattr(result, "data", None) or []
+            if data:
+                self.notification_id = int(data[0].get("notification_id") or 0)
 
-        return "notification_sent"
+            return "notification_sent"
+
+        except Exception:
+            return "notification_not_sent"
 
     def getContent(self) -> str:
         return self.content
