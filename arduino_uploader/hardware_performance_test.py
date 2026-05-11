@@ -1,5 +1,3 @@
-
-
 """
 Hardware performance test for LUMIN real-time Arduino readings.
 
@@ -22,7 +20,8 @@ Example:
     220.5,1.2
 
 Usage on Windows:
-    python arduino_uploader/hardware_performance_test.py --port COM11 --device-id 50 --requests 30
+    python arduino_uploader/
+    
 
 If your Arduino uses a different COM port:
     python arduino_uploader/hardware_performance_test.py --port COM5 --device-id 50 --requests 30
@@ -54,22 +53,37 @@ def parse_arduino_line(line: str) -> tuple[float, float] | None:
     """
     Parse Arduino serial line.
 
-    Expected format:
-        voltage,current
+    Expected format (4 columns from Lumin Arduino):
+        voltage,current_led,current_motor,current_heater
 
     Returns:
-        (voltage, current) if valid, otherwise None.
+        (voltage, total_current) where total_current = sum of all device currents.
+        Returns None if line is invalid.
     """
     parts = line.strip().split(",")
-    if len(parts) != 2:
-        return None
 
-    try:
-        voltage = float(parts[0].strip())
-        current = float(parts[1].strip())
-        return voltage, current
-    except ValueError:
-        return None
+    # Accept 4-column format: voltage, led, motor, heater
+    if len(parts) == 4:
+        try:
+            voltage      = float(parts[0].strip())
+            current_led  = float(parts[1].strip())
+            current_mot  = float(parts[2].strip())
+            current_htr  = float(parts[3].strip())
+            total_current = current_led + current_mot + current_htr
+            return voltage, total_current
+        except ValueError:
+            return None
+
+    # Accept original 2-column format: voltage, current
+    if len(parts) == 2:
+        try:
+            voltage = float(parts[0].strip())
+            current = float(parts[1].strip())
+            return voltage, current
+        except ValueError:
+            return None
+
+    return None
 
 
 def calculate_watts(voltage: float, current: float, scale_factor: float) -> float:

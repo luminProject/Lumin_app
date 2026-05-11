@@ -819,22 +819,22 @@ class LuminFacade:
 
     def view_recommendations(self, user_id: str) -> List[Dict[str, Any]]:
         res = (
-            supabase
+            self.supabase
             .table("recommendation")
-            .select("recommendation_text, creation_time")
+            .select("recommendation_text, timestamp")
             .eq("user_id", user_id)
-            .order("creation_time", desc=True)
+            .order("timestamp", desc=True)
             .execute()
         )
         return res.data or []
 
     def get_notifications(self, user_id: str) -> List[Dict[str, Any]]:
         res = (
-            supabase
+            self.supabase
             .table("notification")
-            .select("content, type, time")
+            .select("content, notification_type, timestamp")
             .eq("user_id", user_id)
-            .order("time", desc=True)
+            .order("timestamp", desc=True)
             .execute()
         )
         return res.data or []
