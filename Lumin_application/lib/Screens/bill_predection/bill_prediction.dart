@@ -28,7 +28,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   String? _setupMessage;
   String? _cycleStart;
   String? _cycleEnd;
-  int _daysPassed = 0;
+  
 
   double _currentBill = 0;
   double _predictedBill = 0;
@@ -64,6 +64,26 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
   }
 
   bool get _hasBillLimit => _billLimit != null && _billLimit! > 0;
+
+
+  ButtonStyle _primaryButtonStyle({double fontSize = 14.5, double radius = 14}) {
+    return ElevatedButton.styleFrom(
+      backgroundColor: const Color(0xFF3F8E6B),
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: const Color(0xFF3F8E6B),
+      disabledForegroundColor: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      textStyle: TextStyle(
+        fontSize: fontSize,
+        fontWeight: FontWeight.w700,
+        fontFamily: 'Roboto',
+        letterSpacing: 0,
+      ),
+    );
+  }
 
   String _formatFixedRange(
     double centerValue,
@@ -125,19 +145,73 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
 
     return '${months[d.month - 1]} ${d.day}';
   }
-    /// ✅ FIX Today Date
+
   String _formatDateTime(DateTime date) {
-  // Force Saudi Arabia time UTC+3
-  final d = DateTime.now().toUtc().add(const Duration(hours: 3));
+    // Display today's date using Saudi Arabia time (UTC+3).
+    final d = DateTime.now().toUtc().add(const Duration(hours: 3));
 
-  const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
 
-  return '${months[d.month - 1]} ${d.day}';
+    return '${months[d.month - 1]} ${d.day}';
+  }
+
+String _getFriendlyErrorMessage(dynamic error) {
+  final raw = error.toString();
+  final message = raw.toLowerCase();
+
+final isNetworkError =
+    message.contains('socket') ||
+    message.contains('clientexception') ||
+    message.contains('failed to fetch') ||
+    message.contains('xmlhttprequest') ||
+    message.contains('connection refused') ||
+    message.contains('connection abort') ||
+    message.contains('failed host lookup') ||
+    message.contains('network') ||
+    message.contains('timed out') ||
+    message.contains('timeout') ||
+    message.contains('uri=http') ||
+    message.contains('no access token') ||
+    message.contains('user not logged in') ||
+    message.contains('session has expired') ||
+    message.contains('invalid token') ||
+    message.contains('unauthorized') ||
+    message.contains('forbidden');
+
+  if (isNetworkError) {
+    return 'Unable to connect. Please check your connection and try again.';
+  }
+
+  final cleaned = raw.replaceFirst('Exception: ', '').trim();
+
+  return cleaned.isNotEmpty
+      ? cleaned
+      : 'Something went wrong. Please try again.';
 }
-  
+  int _calculateTodayDayInCycle(String cycleStart) {
+    final start = DateTime.parse(cycleStart);
+    final now = DateTime.now().toUtc().add(const Duration(hours: 3));
+
+    final startDate = DateTime(start.year, start.month, start.day);
+    final todayDate = DateTime(now.year, now.month, now.day);
+
+    final day = todayDate.difference(startDate).inDays + 1;
+
+    return day.clamp(1, 30);
+  }
   String? _calculateCycleEndFromStart(String? startDate) {
     if (startDate == null || startDate.isEmpty) return null;
 
@@ -241,8 +315,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
         _cycleEnd =
             endFromBackend ?? _calculateCycleEndFromStart(startFromBackend);
 
-        _daysPassed = ((data['days_passed'] ?? 0) as num).toInt();
-
+       
         _currentBill = ((data['actual_bill'] ?? 0) as num).toDouble();
         _predictedBill = ((data['predicted_bill'] ?? 0) as num).toDouble();
         _currentUsage = ((data['current_usage_kwh'] ?? 0) as num).toDouble();
@@ -265,7 +338,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
 
       if (!isAutoRefresh) {
         setState(() {
-          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+          _errorMessage = _getFriendlyErrorMessage(e);
         });
       }
     } finally {
@@ -305,8 +378,6 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
         _cycleStart = startFromBackend;
         _cycleEnd =
             endFromBackend ?? _calculateCycleEndFromStart(startFromBackend);
-
-        _daysPassed = ((data['days_passed'] ?? 0) as num).toInt();
 
         _currentBill = ((data['actual_bill'] ?? 0) as num).toDouble();
         _predictedBill = ((data['predicted_bill'] ?? 0) as num).toDouble();
@@ -361,73 +432,126 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
         bottomNavigationBar: const HomeBottomNav(currentIndex: 1),
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _errorMessage != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            _errorMessage!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          const SizedBox(height: 12),
-                          ElevatedButton(
-                            onPressed: _loadBillData,
-                            child: const Text('Retry'),
-                          ),
-                        ],
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 10),
+                  if (_errorMessage != null) ...[
+                    _buildErrorCard(),
+                    const SizedBox(height: 14),
+                  ],
+                  if (_errorMessage == null) ...[
+                    if (_setupRequired)
+                      _buildSetupRequiredCard()
+                    else ...[
+                      _buildForecastHeader(),
+                      const SizedBox(height: 14),
+                      _buildHeroForecastCard(),
+                      const SizedBox(height: 14),
+                      _buildDoubleStatCard(
+                        title: 'Bill Summary',
+                        leadingIcon: Icons.receipt_long_rounded,
+                        leftLabel: 'Bill So Far',
+                        leftValue: '${_currentBill.round()} ﷼',
+                        leftUnit: 'based on your usage',
+                        rightLabel: _forecastReady
+                            ? 'Predicted Bill'
+                            : 'Prediction Status',
+                        rightValue: _forecastReady
+                            ? '$_predictedBillRangeText ﷼'
+                            : '--',
+                        rightUnit: _forecastReady
+                            ? 'by end of month'
+                            : 'Need 7 days',
                       ),
-                    ),
-                  )
-                : _setupRequired
-                    ? _buildSetupRequiredCard()
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 10),
-                          _buildForecastHeader(),
-                          const SizedBox(height: 14),
-                          _buildHeroForecastCard(),
-                          const SizedBox(height: 14),
-                          _buildDoubleStatCard(
-                            title: 'Bill Summary',
-                            leadingIcon: Icons.receipt_long_rounded,
-                            leftLabel: 'Bill So Far',
-                            leftValue: '${_currentBill.round()} ﷼',
-                            leftUnit: 'based on your usage',
-                            rightLabel: _forecastReady
-                                ? 'Predicted Bill'
-                                : 'Prediction Status',
-                            rightValue: _forecastReady
-                                ? '$_predictedBillRangeText ﷼'
-                                : '--',
-                            rightUnit: _forecastReady
-                                ? 'by end of month'
-                                : 'Need 7 days',
-                          ),
-                          const SizedBox(height: 12),
-                          _buildDoubleStatCard(
-                            title: 'Usage Summary',
-                            leadingIcon: Icons.flash_on_rounded,
-                            leftLabel: 'Usage So Far',
-                            leftValue: _currentUsage.round().toString(),
-                            leftUnit: 'kWh used until now',
-                            rightLabel: 'Predicted Usage',
-                            rightValue: _forecastReady
-                                ? _predictedUsageRangeText
-                                : '--',
-                            rightUnit: _forecastReady
-                                ? 'by end of month'
-                                : 'Need 7 days',
-                          ),
-                          const SizedBox(height: 14),
-                          _buildLimitCard(),
-                          const SizedBox(height: 160),
-                        ],
+                      const SizedBox(height: 12),
+                      _buildDoubleStatCard(
+                        title: 'Usage Summary',
+                        leadingIcon: Icons.flash_on_rounded,
+                        leftLabel: 'Usage So Far',
+                        leftValue: _currentUsage.round().toString(),
+                        leftUnit: 'kWh used until now',
+                        rightLabel: 'Predicted Usage',
+                        rightValue: _forecastReady ? _predictedUsageRangeText : '--',
+                        rightUnit: _forecastReady
+                            ? 'by end of month'
+                            : 'Need 7 days',
                       ),
+                      const SizedBox(height: 14),
+                      _buildLimitCard(),
+                    ],
+                  ],
+                  const SizedBox(height: 160),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _buildErrorCard() {
+    return SizedBox(
+      width: double.infinity,
+      child: GlassCard(
+        radius: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+            ),
+            child: const Icon(
+              Icons.wifi_off_rounded,
+              color: Colors.redAccent,
+              size: 30,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Unable to load bill prediction',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _errorMessage ?? 'Please try again.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.68),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 44,
+            child: ElevatedButton(
+              onPressed: _loadBillData,
+              style: _primaryButtonStyle(fontSize: 14, radius: 14),
+              child: const Text(
+                'Retry',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Roboto',
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+          ),
+          ],
+        ),
       ),
     );
   }
@@ -748,8 +872,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
                           await _saveBillLimit(value);
                         } catch (e) {
                           setSheetState(() {
-                            sheetError =
-                                e.toString().replaceFirst('Exception: ', '');
+                            sheetError = _getFriendlyErrorMessage(e);
                           });
                         }
                       },
@@ -807,193 +930,205 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
     );
   }
 
-  Widget _buildForecastHeader() {
-    final bool hasStart = _cycleStart != null && _cycleStart!.isNotEmpty;
+Widget _buildForecastHeader() {
+  final bool hasStart = _cycleStart != null && _cycleStart!.isNotEmpty;
 
-    final String? calculatedEnd =
-        hasStart ? _calculateCycleEndFromStart(_cycleStart!) : null;
+  final String? calculatedEnd =
+      hasStart ? _calculateCycleEndFromStart(_cycleStart!) : null;
 
-    final String? displayEnd =
-        (_cycleEnd != null && _cycleEnd!.isNotEmpty) ? _cycleEnd : calculatedEnd;
+  final String? displayEnd =
+      (_cycleEnd != null && _cycleEnd!.isNotEmpty) ? _cycleEnd : calculatedEnd;
 
-    final bool hasData = hasStart && displayEnd != null;
+  final bool hasData = hasStart && displayEnd != null;
 
-    final double progress =
-        (_daysPassed > 0) ? (_daysPassed / 30).clamp(0.0, 1.0) : 0.0;
-
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      radius: 18,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.mint.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.insights_rounded,
-                  color: AppColors.mint,
-                  size: 22,
+  return GlassCard(
+    padding: const EdgeInsets.all(16),
+    radius: 18,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.mint.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.insights_rounded,
+                color: AppColors.mint,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Monthly Prediction',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Monthly Prediction',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 12),
+
+        Text(
+          _forecastReady
+              ? 'See your expected bill early and stay within your budget.'
+              : 'Your prediction appears after 7 days of recorded usage.',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.65),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
           ),
-          const SizedBox(height: 12),
+        ),
+
+        const SizedBox(height: 20),
+
+        if (hasData) ...[
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+
+              final int todayDay =
+                  _calculateTodayDayInCycle(_cycleStart!);
+
+              final double markerProgress =
+                  todayDay <= 1 ? 0.0 : ((todayDay - 1) / 29).clamp(0.0, 1.0);
+
+              final double markerCenter = width * markerProgress;
+
+              final double dotLeft =
+                  markerCenter.clamp(5.0, width - 5.0);
+
+              final double labelLeft =
+                  (markerCenter - 26).clamp(0.0, width - 52.0);
+
+              return Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatDate(_cycleStart!),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        _formatDate(displayEnd!),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+
+                      FractionallySizedBox(
+                        widthFactor: markerProgress,
+                        child: Container(
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: AppColors.mint,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                      ),
+
+                      Positioned(
+                        left: dotLeft - 5,
+                        top: -2,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: const BoxDecoration(
+                            color: AppColors.mint,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    height: 34,
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          left: labelLeft,
+                          child: SizedBox(
+                            width: 52,
+                            child: Column(
+                              children: [
+                                const Text(
+                                  'Today',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: AppColors.mint,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _formatDateTime(DateTime.now()),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: AppColors.mint,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ] else ...[
           Text(
-            _forecastReady
-                ? 'See your expected bill early and stay within your budget.'
-                : 'Your prediction appears after 7 days of recorded usage.',
+            'Billing period not available',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.65),
+              color: Colors.white.withOpacity(0.6),
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 20),
-          if (hasData) ...[
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-
-                double markerLeft = width * progress;
-
-                const edgePadding = 42.0;
-                if (markerLeft < edgePadding) markerLeft = edgePadding;
-                if (markerLeft > width - edgePadding) {
-                  markerLeft = width - edgePadding;
-                }
-
-                return Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          _formatDate(_cycleStart!),
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          _formatDate(displayEnd!),
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        FractionallySizedBox(
-                          widthFactor: progress,
-                          child: Container(
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: AppColors.mint,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          left: markerLeft - 5,
-                          top: -2,
-                          child: Container(
-                            width: 10,
-                            height: 10,
-                            decoration: const BoxDecoration(
-                              color: AppColors.mint,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 34,
-                      child: Stack(
-                        children: [
-                          Positioned(
-                            left: markerLeft - 26,
-                            child: SizedBox(
-                              width: 52,
-                              child: Column(
-                                children: [
-                                  const Text(
-                                    'Today',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: AppColors.mint,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _formatDateTime(DateTime.now()),
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      color: AppColors.mint,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ] else ...[
-            Text(
-              'Billing period not available',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.6),
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
         ],
-      ),
-    );
-  }
-
+      ],
+    ),
+  );
+}
   Widget _buildHeroForecastCard() {
     final bool isWarning = _limitWarning;
 
@@ -1103,8 +1238,7 @@ class _BillPredictionPageState extends State<BillPredictionPage> {
               ),
             ),
           ),
-
-const SizedBox(height: 6),
+          const SizedBox(height: 6),
           Text(
             _hasBillLimit
                 ? 'Compared to your limit: ${_billLimit!.round()} ﷼'
@@ -1133,11 +1267,15 @@ const SizedBox(height: 6),
               height: 46,
               child: ElevatedButton(
                 onPressed: _openSetBillLimitSheet,
+                style: _primaryButtonStyle(fontSize: 14.5, radius: 14),
                 child: const Text(
                   'Set Bill Limit',
                   style: TextStyle(
+                    color: Colors.white,
                     fontSize: 14.5,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'Roboto',
+                    letterSpacing: 0,
                   ),
                 ),
               ),
@@ -1332,14 +1470,19 @@ const SizedBox(height: 6),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
-            height: 46,
+            height: 48,
             child: ElevatedButton(
               onPressed: _openSetBillLimitSheet,
+              style: _primaryButtonStyle(fontSize: 15, radius: 16),
               child: Text(
                 _hasBillLimit ? 'Adjust Bill Limit' : 'Set Bill Limit',
+                textAlign: TextAlign.center,
                 style: const TextStyle(
+                  color: Colors.white,
                   fontSize: 15,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Roboto',
+                  letterSpacing: 0,
                 ),
               ),
             ),

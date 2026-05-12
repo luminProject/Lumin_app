@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import logging
+from postgrest.exceptions import APIError
+from requests.exceptions import ConnectionError, ReadTimeout
+
 from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import random
 
+class DatabaseOperationError(Exception):
+    """Raised when a database operation fails."""
+    pass
+
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """
@@ -28,31 +37,44 @@ class DatabaseManager:
         DatabaseManager returns raw dict only.
         It does not know the User model.
         """
+        try:
+            result = (
+                self.supabase.table("users")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .limit(1)
+                .execute()
+            )
 
-        result = (
-            self.supabase.table("users")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .limit(1)
-            .execute()
-        )
+            rows = getattr(result, "data", None) or []
+            return rows[0] if rows else None
 
-        rows = getattr(result, "data", None) or []
-        return rows[0] if rows else None
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while fetching user profile: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while fetching user profile."
+            )
 
     def insert_user_profile_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """
         Insert user profile row.
         """
+        try:
+            result = self.supabase.table("users").insert(row).execute()
+            rows = getattr(result, "data", None) or []
 
-        result = self.supabase.table("users").insert(row).execute()
+            if not rows:
+                raise ValueError("Failed to create profile")
 
-        rows = getattr(result, "data", None) or []
+            return rows[0]
 
-        if not rows:
-            raise ValueError("Failed to create profile")
-
-        return rows[0]
+        except ValueError:
+            raise
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while creating user profile: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while creating user profile."
+            )
 
     def update_user_profile_row(
         self,
@@ -62,20 +84,28 @@ class DatabaseManager:
         """
         Update user profile row.
         """
+        try:
+            (
+                self.supabase.table("users")
+                .update(info)
+                .eq("user_id", str(user_id))
+                .execute()
+            )
 
-        (
-            self.supabase.table("users")
-            .update(info)
-            .eq("user_id", str(user_id))
-            .execute()
-        )
+            row = self.get_user_profile_row(user_id)
 
-        row = self.get_user_profile_row(user_id)
+            if not row:
+                raise ValueError("Profile not found")
 
-        if not row:
-            raise ValueError("Profile not found")
+            return row
 
-        return row
+        except ValueError:
+            raise
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while updating user profile: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while updating user profile."
+            )
 
     # =============================
     # USER BILLING DATE
@@ -89,23 +119,29 @@ class DatabaseManager:
         - Calculate current billing cycle
         - Define cycle_start = last_billing_end_date + 1
         """
+        try:
+            rows = (
+                self.supabase.table("users")
+                .select("last_billing_end_date")
+                .eq("user_id", str(user_id))
+                .limit(1)
+                .execute()
+            ).data or []
 
-        rows = (
-            self.supabase.table("users")
-            .select("last_billing_end_date")
-            .eq("user_id", str(user_id))
-            .limit(1)
-            .execute()
-        ).data or []
+            if not rows:
+                return None
 
-        if not rows:
-            return None
+            raw = rows[0].get("last_billing_end_date")
+            if not raw:
+                return None
 
-        raw = rows[0].get("last_billing_end_date")
-        if not raw:
-            return None
+            return DateType.fromisoformat(str(raw)[:10])
 
-        return DateType.fromisoformat(str(raw)[:10])
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while fetching billing date: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while fetching billing date."
+            )
 
     def update_user_last_billing_end_date(
         self,
@@ -119,13 +155,19 @@ class DatabaseManager:
         - This does NOT touch billprediction table.
         - System will react later when GET /bill is called.
         """
+        try:
+            (
+                self.supabase.table("users")
+                .update({"last_billing_end_date": last_billing_end_date.isoformat()})
+                .eq("user_id", str(user_id))
+                .execute()
+            )
 
-        (
-            self.supabase.table("users")
-            .update({"last_billing_end_date": last_billing_end_date.isoformat()})
-            .eq("user_id", str(user_id))
-            .execute()
-        )
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while updating billing date: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while updating billing date."
+            )
 
     # =============================
     # ENERGY DATA
@@ -144,19 +186,27 @@ class DatabaseManager:
         - actual usage calculation
         - SMA-7 forecast
         """
+        try:
+            result = (
+                self.supabase.table("energycalculation")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .gte("date", cycle_start.isoformat())
+                .lte("date", cycle_end.isoformat())
+                .order("date", desc=False)
+                .execute()
+            )
 
-        result = (
-            self.supabase.table("energycalculation")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .gte("date", cycle_start.isoformat())
-            .lte("date", cycle_end.isoformat())
-            .order("date", desc=False)
-            .execute()
-        )
+            return getattr(result, "data", None) or []
 
-        return getattr(result, "data", None) or []
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while fetching current cycle energy rows: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while fetching current cycle energy rows."
+            )
 
+    
+    
     # ── Sprint 2: Stats chart ──────────────────────────────────────
     # Added for the Home screen statistics chart (Week/Month/Year).
     # Fetches only the columns needed for chart rendering.
@@ -195,11 +245,17 @@ class DatabaseManager:
         Used by:
         - scheduler jobs
         """
+        try:
+            result = self.supabase.table("energycalculation").select("user_id").execute()
 
-        result = self.supabase.table("energycalculation").select("user_id").execute()
+            rows = getattr(result, "data", None) or []
+            return sorted(set(str(r["user_id"]) for r in rows if r.get("user_id")))
 
-        rows = getattr(result, "data", None) or []
-        return sorted(set(str(r["user_id"]) for r in rows if r.get("user_id")))
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while fetching users with energy: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while fetching users with energy."
+            )
 
     # =============================
     # BILL PREDICTION TABLE
@@ -212,17 +268,23 @@ class DatabaseManager:
         Used ONLY for:
         - carrying forward limit_amount
         """
+        try:
+            rows = (
+                self.supabase.table("billprediction")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .order("limit_id", desc=True)
+                .limit(1)
+                .execute()
+            ).data or []
 
-        rows = (
-            self.supabase.table("billprediction")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .order("limit_id", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
+            return rows[0] if rows else None
 
-        return rows[0] if rows else None
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while fetching latest bill row: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while fetching latest bill row."
+            )
 
     def get_bill_row_by_cycle(
         self,
@@ -239,17 +301,23 @@ class DatabaseManager:
         - update existing row
         - OR create new row
         """
+        try:
+            rows = (
+                self.supabase.table("billprediction")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .eq("cycle_start", cycle_start.isoformat())
+                .limit(1)
+                .execute()
+            ).data or []
 
-        rows = (
-            self.supabase.table("billprediction")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .eq("cycle_start", cycle_start.isoformat())
-            .limit(1)
-            .execute()
-        ).data or []
+            return rows[0] if rows else None
 
-        return rows[0] if rows else None
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while fetching bill row by cycle: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while fetching bill row."
+            )
 
     def save_current_cycle_bill(self, user_id: str, payload: Dict[str, Any]) -> int:
         """
@@ -259,24 +327,29 @@ class DatabaseManager:
         If it exists, update it.
         If not, insert it.
         """
+        try:
+            payload["user_id"] = user_id
 
-        payload["user_id"] = user_id
-
-        result = (
-            self.supabase
-            .table("billprediction")
-            .upsert(
-                payload,
-                on_conflict="user_id,cycle_start"
+            result = (
+                self.supabase
+                .table("billprediction")
+                .upsert(
+                    payload,
+                    on_conflict="user_id,cycle_start"
+                )
+                .execute()
             )
-            .execute()
-        )
 
-        data = getattr(result, "data", None) or []
-        return int(data[0].get("limit_id") or 0) if data else 0  
-        
-    
+            data = getattr(result, "data", None) or []
+            return int(data[0].get("limit_id") or 0) if data else 0
 
+        except (APIError, ConnectionError, ReadTimeout) as e:
+            logger.error(f"Database error while saving bill prediction: {e}")
+            raise DatabaseOperationError(
+                "Database operation failed while saving bill prediction."
+            )
+
+   
 
     # =========================================================
     # USERS (new)

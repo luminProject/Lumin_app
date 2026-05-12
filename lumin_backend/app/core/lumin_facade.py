@@ -721,12 +721,7 @@ class LuminFacade:
         One user failure should not stop the whole scheduler.
         """
     def run_bill_checkpoint_for_all_users(self) -> Dict[str, Any]:
-        """
-        Called by daily scheduler.
 
-        Runs bill checkpoint logic for all users who have energy rows.
-        One user failure should not stop the whole scheduler.
-        """
         user_ids = self.db.get_users_with_energy()
 
         processed_users = 0

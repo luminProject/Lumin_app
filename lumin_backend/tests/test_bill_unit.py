@@ -37,20 +37,6 @@ def mock_today(monkeypatch, target_module, fixed_date: date) -> None:
     monkeypatch.setattr(target_module.datetime, "datetime", FixedDateTime)
 
 
-def make_usage_data(cycle_start: date, days: int, daily_value: float = 10.0) -> dict:
-    """
-    Build fake usage data in the same structure expected by PredictBill().
-    """
-
-    return {
-        "daily_dates": [
-            date.fromordinal(cycle_start.toordinal() + i).isoformat()
-            for i in range(days)
-        ],
-        "daily_net_values": [daily_value for _ in range(days)],
-        "current_usage_kwh": round(days * daily_value, 2),
-    }
-
 
 # =========================================================
 # 1) BillPrediction.setLimit()
@@ -140,7 +126,6 @@ class TestCalculateBill:
 # =========================================================
 # 3) BillPrediction.PredictBill()
 # =========================================================
-
 class TestPredictBill:
     """
     Tests SMA-7 bill prediction and checkpoint behavior.
@@ -153,13 +138,27 @@ class TestPredictBill:
         mock_today(monkeypatch, bill_module, date(2026, 5, 7))
 
         bill = BillPrediction(USER_ID)
+
         bill.load_and_sync_state(
             {"limit_amount": 300},
             {"current_usage_kwh": 60},
             cycle_start,
         )
 
-        checkpoint = bill.PredictBill(make_usage_data(cycle_start, 6, 10))
+        usage_data = {
+            "daily_dates": [
+                "2026-05-01",
+                "2026-05-02",
+                "2026-05-03",
+                "2026-05-04",
+                "2026-05-05",
+                "2026-05-06",
+            ],
+            "daily_net_values": [10, 10, 10, 10, 10, 10],
+            "current_usage_kwh": 60,
+        }
+
+        checkpoint = bill.PredictBill(usage_data)
 
         assert checkpoint is None
         assert bill.to_dict()["forecast_available"] is False
@@ -171,13 +170,29 @@ class TestPredictBill:
         mock_today(monkeypatch, bill_module, date(2026, 5, 8))
 
         bill = BillPrediction(USER_ID)
+
         bill.load_and_sync_state(
             {"limit_amount": 300},
             {"current_usage_kwh": 70},
             cycle_start,
         )
 
-        checkpoint = bill.PredictBill(make_usage_data(cycle_start, 7, 10))
+        usage_data = {
+            "daily_dates": [
+                "2026-05-01",
+                "2026-05-02",
+                "2026-05-03",
+                "2026-05-04",
+                "2026-05-05",
+                "2026-05-06",
+                "2026-05-07",
+            ],
+            "daily_net_values": [10, 10, 10, 10, 10, 10, 10],
+            "current_usage_kwh": 70,
+        }
+
+        checkpoint = bill.PredictBill(usage_data)
+
         result = bill.to_dict()
 
         assert checkpoint == 7
@@ -193,6 +208,7 @@ class TestPredictBill:
         mock_today(monkeypatch, bill_module, date(2026, 5, 8))
 
         bill = BillPrediction(USER_ID)
+
         bill.load_and_sync_state(
             {"limit_amount": 300},
             {"current_usage_kwh": 60},
@@ -224,6 +240,7 @@ class TestPredictBill:
         mock_today(monkeypatch, bill_module, date(2026, 5, 8))
 
         bill = BillPrediction(USER_ID)
+
         bill.load_and_sync_state(
             {
                 "limit_amount": 300,
@@ -236,11 +253,24 @@ class TestPredictBill:
             cycle_start,
         )
 
-        checkpoint = bill.PredictBill(make_usage_data(cycle_start, 7, 10))
+        usage_data = {
+            "daily_dates": [
+                "2026-05-01",
+                "2026-05-02",
+                "2026-05-03",
+                "2026-05-04",
+                "2026-05-05",
+                "2026-05-06",
+                "2026-05-07",
+            ],
+            "daily_net_values": [10, 10, 10, 10, 10, 10, 10],
+            "current_usage_kwh": 70,
+        }
+
+        checkpoint = bill.PredictBill(usage_data)
 
         assert checkpoint is None
         assert bill.to_dict()["last_checkpoint_day"] == 7
-
 
 # =========================================================
 # 4) BillPrediction.is_predicted_bill_over_limit()
@@ -269,7 +299,7 @@ class TestBillWarningDecision:
         bill.load_and_sync_state(
             {
                 "limit_amount": 300,
-                "predicted_bill": 290,
+                "predicted_bill": 310,
                 "forecast_available": True,
             },
             {"current_usage_kwh": 100},

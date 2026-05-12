@@ -52,7 +52,56 @@ class ApiService {
     if (json) headers['Content-Type'] = 'application/json';
     return headers;
   }
+  void _logApiError(String label, http.Response response) {
+    debugPrint('$label failed');
+    debugPrint('Status: ${response.statusCode}');
+    debugPrint('Body: ${response.body}');
+  }
 
+  bool _isTechnicalMessage(String message) {
+    final lower = message.toLowerCase();
+
+    return lower.contains('socket') ||
+        lower.contains('clientexception') ||
+        lower.contains('errno') ||
+        lower.contains('address') ||
+        lower.contains('port') ||
+        lower.contains('uri=') ||
+        lower.contains('traceback') ||
+        lower.contains('sql') ||
+        lower.contains('postgrest') ||
+        lower.contains('exception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection abort') ||
+        lower.contains('network is unreachable');
+  }
+
+  String _extractBackendMessage(http.Response response, String fallback) {
+    try {
+      final body = json.decode(response.body);
+
+      if (body is Map && body['detail'] != null) {
+        final detail = body['detail'].toString().trim();
+
+        if (detail.isNotEmpty && !_isTechnicalMessage(detail)) {
+          return detail;
+        }
+      }
+
+      if (body is Map && body['message'] != null) {
+        final message = body['message'].toString().trim();
+
+        if (message.isNotEmpty && !_isTechnicalMessage(message)) {
+          return message;
+        }
+      }
+    } catch (_) {}
+
+    return fallback;
+  }
+  
+  
   // ===== Devices =====
 
   /// GET /devices/{userId}
@@ -158,6 +207,7 @@ class ApiService {
   // ===== Bill =====
 
   /// GET /bill/{userId}
+
   Future<Map<String, dynamic>> getBill() async {
     final url = '$baseUrl/bill/$_userId';
 
@@ -171,7 +221,12 @@ class ApiService {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'];
     } else {
-      throw Exception('Failed to load bill prediction: ${response.body}');
+      _logApiError('GET BILL', response);
+      final message = _extractBackendMessage(
+        response,
+        'Unable to load bill prediction. Please try again.',
+      );
+      throw Exception(message);
     }
   }
 
@@ -191,20 +246,14 @@ class ApiService {
     } else if (response.statusCode == 401 || response.statusCode == 403) {
       throw Exception('Your session has expired. Please sign in again.');
     } else {
-      String message =
-          'Unable to save your bill limit right now. Please try again.';
-
-      try {
-        final errorBody = json.decode(response.body);
-        if (errorBody is Map && errorBody['detail'] != null) {
-          message = errorBody['detail'].toString();
-        }
-      } catch (_) {}
-
+      _logApiError('SET BILL LIMIT', response);
+      final message = _extractBackendMessage(
+        response,
+        'Unable to save your bill limit right now. Please try again.',
+      );
       throw Exception(message);
     }
   }
-
   // ===== Energy =====
 
   /// GET /energy/{userId}
@@ -385,7 +434,12 @@ class ApiService {
       headers: authHeaders(),
     );
     if (res.statusCode >= 400) {
-      throw Exception('GET ${res.statusCode}: ${res.body}');
+      _logApiError('GET PROFILE', res);
+      final message = _extractBackendMessage(
+        res,
+        'Unable to load profile. Please try again.',
+      );
+      throw Exception(message);
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -401,7 +455,12 @@ class ApiService {
       body: jsonEncode(payload),
     );
     if (res.statusCode >= 400) {
-      throw Exception('PATCH ${res.statusCode}: ${res.body}');
+      _logApiError('PATCH PROFILE', res);
+      final message = _extractBackendMessage(
+        res,
+        'Unable to update profile. Please try again.',
+      );
+      throw Exception(message);
     }
   }
 
@@ -409,4 +468,5 @@ class ApiService {
   Future<void> updateAvatarUrl(String userId, String avatarUrl) async {
     await updateProfile(userId, {'avatar_url': avatarUrl});
   }
+
 }

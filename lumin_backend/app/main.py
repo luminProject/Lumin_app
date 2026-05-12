@@ -16,6 +16,7 @@ Responsibilities:
 """
 
 from contextlib import asynccontextmanager
+from app.core.database_manager import DatabaseOperationError
 from fastapi import FastAPI, HTTPException, Header 
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
@@ -379,6 +380,8 @@ def get_my_current_bill(
     except BillingDateRequiredError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except BillValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except DatabaseOperationError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -406,6 +409,8 @@ def set_bill_limit(
     except BillingDateRequiredError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except BillValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except DatabaseOperationError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/internal/run-bill-checkpoint")
@@ -422,6 +427,10 @@ def run_bill_checkpoint():
         raise HTTPException(status_code=400, detail=str(e))
     except BillValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=500, detail=str(e))    
+
+
 # -----------------------------
 # Solar Forecast Endpoint
 # -----------------------------

@@ -115,15 +115,8 @@ class EnergyCalculation(Observer):
     # Called by LuminFacade for billing cycle calculations.
 
     def get_cycle_usage_summary (self, energy_rows: list[dict] | None = None) -> dict:
-        """
-        Business logic only.
-
-        The method name is kept to avoid breaking existing code.
-        However, rows are now already filtered by billing cycle, not calendar month.
-        """
+ 
         today = datetime.datetime.now(ZoneInfo("Asia/Riyadh")).date()
-
-    
 
         if not energy_rows:
             return {

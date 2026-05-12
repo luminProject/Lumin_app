@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from app.core.database_manager import DatabaseOperationError
 from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
@@ -59,11 +59,8 @@ def get_profile(
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError:
         raise HTTPException(status_code=404, detail="Profile not found")
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to load profile right now.",
-        )
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.patch("/{user_id}", response_model=ProfileOut)
@@ -87,8 +84,5 @@ def update_profile(
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError:
         raise HTTPException(status_code=404, detail="Profile not found")
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to update profile right now.",
-        )
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=500, detail=str(e))

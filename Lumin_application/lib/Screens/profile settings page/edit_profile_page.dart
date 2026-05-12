@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -37,6 +37,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   bool _loading = true;
   bool _saving = false;
+  String? _loadError;
 
   String? _phoneError;
   String? _solarPanelsError;
@@ -116,6 +117,40 @@ class _EditProfilePageState extends State<EditProfilePage> {
       );
   }
 
+  String _getFriendlyErrorMessage(dynamic error) {
+    final raw = error.toString();
+    final message = raw.toLowerCase();
+
+    final isConnectionError =
+        message.contains('socket') ||
+        message.contains('clientexception') ||
+        message.contains('failed to fetch') ||
+        message.contains('xmlhttprequest') ||
+        message.contains('connection refused') ||
+        message.contains('connection abort') ||
+        message.contains('failed host lookup') ||
+        message.contains('network') ||
+        message.contains('timed out') ||
+        message.contains('timeout') ||
+        message.contains('uri=http') ||
+        message.contains('no access token') ||
+        message.contains('user not logged in') ||
+        message.contains('session has expired') ||
+        message.contains('invalid token') ||
+        message.contains('unauthorized') ||
+        message.contains('forbidden');
+
+    if (isConnectionError) {
+      return 'Unable to connect. Please check your connection and try again.';
+    }
+
+    final cleaned = raw.replaceFirst('Exception: ', '').trim();
+
+    return cleaned.isNotEmpty
+        ? cleaned
+        : 'Something went wrong. Please try again.';
+  }
+
   void _preparePhoneInitial(String phone) {
     final p = phone.trim();
 
@@ -166,12 +201,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final token = Supabase.instance.client.auth.currentSession?.accessToken;
 
     if (userId == null || token == null) {
-      setState(() => _loading = false);
-      _toast('Not logged in', success: false);
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = 'Unable to connect. Please check your connection and try again.';
+      });
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
 
     try {
       final data = await _api.getProfile(userId);
@@ -200,13 +241,24 @@ class _EditProfilePageState extends State<EditProfilePage> {
         _localPhoneDigits = '';
       }
 
-      _phoneError = null;
-      _solarPanelsError = null;
-      _billingDateError = null;
+      if (!mounted) return;
+      setState(() {
+        _phoneError = null;
+        _solarPanelsError = null;
+        _billingDateError = null;
+        _loadError = null;
+      });
     } catch (e) {
-      _toast('Failed to load profile: $e', success: false);
+      debugPrint('PROFILE LOAD ERROR: $e');
+
+      if (!mounted) return;
+      setState(() {
+        _loadError = _getFriendlyErrorMessage(e);
+      });
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -253,7 +305,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _toast('Saved');
       await _loadProfile();
     } catch (e) {
-      _toast('Failed to save: $e', success: false);
+      debugPrint('PROFILE SAVE ERROR: $e');
+      _toast(_getFriendlyErrorMessage(e), success: false);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -627,9 +680,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
       setState(() => _avatarUrl = publicUrl);
       _toast('Photo updated');
     } on StorageException catch (e) {
-      _toast('Storage: ${e.message}', success: false);
+      debugPrint('AVATAR STORAGE ERROR: ${e.message}');
+      _toast('Unable to upload photo. Please try again.', success: false);
     } catch (e) {
-      _toast('Upload error: $e', success: false);
+      debugPrint('AVATAR UPLOAD ERROR: $e');
+      _toast(_getFriendlyErrorMessage(e), success: false);
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
     }
@@ -661,7 +716,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
               )
-            : Form(
+            : _loadError != null
+                ? _buildLoadErrorCard()
+                : Form(
                 key: _formKey,
                 child: Column(
                   children: [
@@ -942,6 +999,82 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ],
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildLoadErrorCard() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 90),
+      child: SizedBox(
+        width: double.infinity,
+        child: GlassCard(
+          radius: 22,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 26),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+                ),
+                child: const Icon(
+                  Icons.wifi_off_rounded,
+                  color: Colors.redAccent,
+                  size: 30,
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Unable to load profile',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _loadError ?? 'Please try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.70),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: _loadProfile,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF3F8E6B),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text(
+                    'Retry',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
