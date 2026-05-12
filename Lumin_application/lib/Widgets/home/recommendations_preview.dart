@@ -33,21 +33,8 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
     try {
       final res = await _api.getLatestRecommendation();
 
-      if (res != null) {
-        // Check if the recommendation is from today
-        final timestamp = res['timestamp'] as String?;
-        final isToday = _isToday(timestamp);
-
-        if (isToday) {
-          if (mounted) setState(() => _item = _map(res));
-        } else {
-          // Latest recommendation exists but it's from a previous day
-          if (mounted) setState(() => _item = null);
-        }
-      } else {
-        // No recommendations at all
-        if (mounted) setState(() => _item = null);
-      }
+      // Show the latest recommendation regardless of date
+      if (mounted) setState(() => _item = res != null ? _map(res) : null);
     } catch (e) {
       if (mounted) setState(() => _error = _friendlyError(e));
     } finally {
@@ -180,7 +167,7 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'No recommendation yet today',
+                        'No recommendations yet',
                         style: TextStyle(
                             color: Colors.white.withOpacity(0.85),
                             fontSize: 13,
@@ -188,7 +175,7 @@ class _RecommendationsPreviewState extends State<RecommendationsPreview> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Check back later for your next tip.',
+                        'Your personalized tips will appear here.',
                         style: TextStyle(
                             color: Colors.white.withOpacity(0.55),
                             fontSize: 11.5),

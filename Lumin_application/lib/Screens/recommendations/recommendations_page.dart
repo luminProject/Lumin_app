@@ -36,19 +36,14 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
   Future<void> _loadNew() async {
     setState(() { _loadingNew = true; _error = null; });
     try {
-      final res = await _api.getLatestRecommendation();
-
-      if (res != null) {
-        // Check if it was generated today
-        final timestamp = res['timestamp'] as String?;
-        final isToday = _isToday(timestamp);
-
-        setState(() {
-          _newRecs = isToday ? [_mapToRecItem(res, isNew: true)] : [];
-        });
-      } else {
-        setState(() => _newRecs = []);
-      }
+      final data = await _api.getAllRecommendations();
+      setState(() {
+        _newRecs = data
+            .cast<Map<String, dynamic>>()
+            .where((r) => _isToday(r['timestamp'] as String?))
+            .map((r) => _mapToRecItem(r))
+            .toList();
+      });
     } catch (e) {
       setState(() => _error = _friendlyError(e));
     } finally {
@@ -92,7 +87,7 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
       setState(() {
         _history = data
             .cast<Map<String, dynamic>>()
-            .map((r) => _mapToRecItem(r, isNew: false))
+            .map((r) => _mapToRecItem(r))
             .toList();
       });
     } catch (e) {
@@ -104,29 +99,29 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
 
   // ─── Mapping ────────────────────────────────────────────────
 
-  RecItem _mapToRecItem(Map<String, dynamic> r, {required bool isNew}) {
+  RecItem _mapToRecItem(Map<String, dynamic> r) {
     final text = r['recommendation_text'] as String? ?? '';
     final timestamp = r['timestamp'] as String?;
 
     String subtitle;
-    if (isNew) {
-      subtitle = 'Suggested • Now';
-    } else if (timestamp != null) {
-      final dt = DateTime.tryParse(timestamp);
+    if (timestamp != null) {
+      final dt = DateTime.tryParse(timestamp)?.toLocal(); // ← toLocal() يصحح فرق UTC vs السعودية
       if (dt != null) {
         final diff = DateTime.now().difference(dt);
-        if (diff.inMinutes < 60) {
-          subtitle = '${diff.inMinutes} min ago';
+        if (diff.inMinutes < 1) {
+          subtitle = 'Suggested • Just now';
+        } else if (diff.inMinutes < 60) {
+          subtitle = 'Suggested • ${diff.inMinutes}m ago';
         } else if (diff.inHours < 24) {
-          subtitle = '${diff.inHours} hours ago';
+          subtitle = 'Suggested • ${diff.inHours}h ago';
         } else {
-          subtitle = '${diff.inDays} days ago';
+          subtitle = 'Suggested • ${diff.inDays}d ago';
         }
       } else {
-        subtitle = timestamp;
+        subtitle = 'Suggested • Now';
       }
     } else {
-      subtitle = 'Past recommendation';
+      subtitle = 'Suggested • Now';
     }
 
     return RecItem(title: text, subtitle: subtitle, body: text);
@@ -136,15 +131,15 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
     if (_timeFilter == 'Any time') return _history;
     return _history.where((item) {
       if (_timeFilter == 'Today') {
-        return item.subtitle.contains('min') || item.subtitle.contains('hour');
+        return item.subtitle.contains('m ago') || item.subtitle.contains('h ago') || item.subtitle.contains('Just now');
       }
       if (_timeFilter == 'This week') {
-        final match = RegExp(r'(\d+) days?').firstMatch(item.subtitle);
+        final match = RegExp(r'(\d+)d ago').firstMatch(item.subtitle);
         if (match != null) {
           final days = int.tryParse(match.group(1) ?? '') ?? 99;
           return days <= 7;
         }
-        return item.subtitle.contains('min') || item.subtitle.contains('hour');
+        return item.subtitle.contains('m ago') || item.subtitle.contains('h ago') || item.subtitle.contains('Just now');
       }
       return true;
     }).toList();
@@ -335,7 +330,7 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
                         const SizedBox(height: 12),
                         Text(
                           _tab == 0
-                              ? 'No recommendation yet today'
+                              ? 'No recommendations today'
                               : 'No history yet',
                           textAlign: TextAlign.center,
                           style: const TextStyle(
@@ -347,7 +342,7 @@ class _RecommendationsPageState extends State<RecommendationsPage> {
                         const SizedBox(height: 6),
                         Text(
                           _tab == 0
-                              ? 'Your next personalized tip will arrive soon. Pull down to refresh.'
+                              ? 'Your recommendations for today will appear here.'
                               : 'Your past recommendations will appear here.',
                           textAlign: TextAlign.center,
                           style: TextStyle(

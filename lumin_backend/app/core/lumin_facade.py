@@ -852,6 +852,21 @@ class LuminFacade:
     # -----------------------------
 
     def viewRecommendations(self, user_id: str, recommendation_type: str = "auto") -> Dict[str, Any]:
+        # ── Daily limit check ──────────────────────────────────────
+        # المستخدم يستقبل توصية واحدة فقط في اليوم.
+        # الـ scheduler يشتغل أكثر من مرة في الأسبوع، لذا هذا الـ check
+        # يمنع إرسال أكثر من توصية في نفس اليوم.
+        today_count = self.db.count_today_recommendations(user_id)
+        if today_count >= 1:
+            return {
+                "success": False,
+                "status": "skipped",
+                "code": "DAILY_LIMIT_REACHED",
+                "message": "User already received a recommendation today.",
+                "user_id": user_id,
+            }
+        # ───────────────────────────────────────────────────────────
+
         if recommendation_type == "general":
             return self._generate_general_recommendation(user_id)
 
@@ -1143,4 +1158,3 @@ class LuminFacade:
     def resetDailyEnergy(self) -> None:
         """Reset total_energy_daily for all devices. Called at midnight."""
         self.db.reset_all_daily_energy()
- 
