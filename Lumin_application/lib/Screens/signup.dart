@@ -8,6 +8,10 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 
+/// Sign-up screen — allows new users to create a Lumin account.
+///
+/// Collects: username, email, phone, password, energy source, and location.
+/// Saves the user profile to Supabase after successful auth registration.
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
 
@@ -16,25 +20,25 @@ class SignupPage extends StatefulWidget {
 }
 
 class _SignupPageState extends State<SignupPage> {
-  final _usernameC = TextEditingController();
-  final _emailC = TextEditingController();
-  final _passwordC = TextEditingController();
+  final _usernameC        = TextEditingController();
+  final _emailC           = TextEditingController();
+  final _passwordC        = TextEditingController();
   final _confirmPasswordC = TextEditingController();
 
-  bool _obscurePassword = true;
+  bool _obscurePassword        = true;
   bool _obscureConfirmPassword = true;
 
   String _energySource = 'Grid + Solar';
-  bool _hasSolarPanels = true;
+  bool   _hasSolarPanels = true;
 
-  String _fullPhone = '';
-  bool _isPhoneValid = false; // ✅ phone validity (per selected country)
-  bool _loading = false;
+  String _fullPhone   = '';
+  bool   _isPhoneValid = false;
+  bool   _loading      = false;
 
-  // ✅ Password live rules
-  bool _pwMin8 = false;
-  bool _pwHasNumber = false;
-  bool _pwHasSymbol = false;
+  // Live password strength rules
+  bool _pwMin8          = false;
+  bool _pwHasNumber     = false;
+  bool _pwHasSymbol     = false;
   bool _showPasswordRules = false;
 
   static const double _gap12 = 12;
@@ -60,6 +64,7 @@ class _SignupPageState extends State<SignupPage> {
     super.dispose();
   }
 
+  /// Shows a styled floating SnackBar with error or success styling.
   void _showMessage(String message, {bool isError = true}) {
     final snackBar = SnackBar(
       behavior: SnackBarBehavior.floating,
@@ -100,30 +105,34 @@ class _SignupPageState extends State<SignupPage> {
       ..showSnackBar(snackBar);
   }
 
+  /// Basic email format validation.
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[^@]+@[^@]+\.[^@]+$');
     return regex.hasMatch(email);
   }
 
+  /// Updates password strength indicators as the user types.
   void _updatePasswordRules() {
     final p = _passwordC.text;
 
-    final min8 = p.length >= 8;
+    final min8      = p.length >= 8;
     final hasNumber = RegExp(r'\d').hasMatch(p);
-    final hasSymbol =
-        RegExp(r'[!@#$%^&*(),.?":{}|<>_\-\\/\[\]=+;`~]').hasMatch(p);
+    final hasSymbol = RegExp(r'[!@#$%^&*(),.?":{}|<>_\-\\/\[\]=+;`~]').hasMatch(p);
 
     if (min8 != _pwMin8 || hasNumber != _pwHasNumber || hasSymbol != _pwHasSymbol) {
       setState(() {
-        _pwMin8 = min8;
+        _pwMin8      = min8;
         _pwHasNumber = hasNumber;
         _pwHasSymbol = hasSymbol;
       });
     }
   }
 
+  /// True when all three password rules are satisfied.
   bool get _isPasswordStrong => _pwMin8 && _pwHasNumber && _pwHasSymbol;
 
+  /// Checks location permission and returns the current GPS position.
+  /// Throws a user-friendly Exception if permission is denied.
   Future<Position> _requireLocationAndGet() async {
     final enabled = await Geolocator.isLocationServiceEnabled();
     if (!enabled) {
@@ -146,35 +155,22 @@ class _SignupPageState extends State<SignupPage> {
       );
     }
 
-    return Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+    return Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
   }
 
+  /// Validates all fields, creates the Supabase auth user,
+  /// saves the profile row, then navigates to LoginPage.
   Future<void> _createAccount() async {
     final username = _usernameC.text.trim();
-    final email = _emailC.text.trim();
+    final email    = _emailC.text.trim();
     final password = _passwordC.text;
-    final confirm = _confirmPasswordC.text;
+    final confirm  = _confirmPasswordC.text;
 
-    if (username.isEmpty) {
-      _showMessage('Please enter username');
-      return;
-    }
-    if (email.isEmpty) {
-      _showMessage('Please enter email');
-      return;
-    }
-    if (!_isValidEmail(email)) {
-      _showMessage('Please enter a valid email');
-      return;
-    }
-
-    if (_fullPhone.trim().isEmpty) {
-      _showMessage('Please enter phone number');
-      return;
-    }
-
+    // Input validation
+    if (username.isEmpty) { _showMessage('Please enter username'); return; }
+    if (email.isEmpty)    { _showMessage('Please enter email');    return; }
+    if (!_isValidEmail(email)) { _showMessage('Please enter a valid email'); return; }
+    if (_fullPhone.trim().isEmpty) { _showMessage('Please enter phone number'); return; }
     if (!_isPhoneValid) {
       _showMessage('Please enter a valid phone number for the selected country.');
       return;
@@ -186,38 +182,28 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
-    if (password.isEmpty) {
-      _showMessage('Please enter password');
-      return;
-    }
-
+    if (password.isEmpty) { _showMessage('Please enter password'); return; }
     if (!_isPasswordStrong) {
       setState(() => _showPasswordRules = true);
       _showMessage('Please use a stronger password (see requirements below).');
       return;
     }
-
-    if (confirm.isEmpty) {
-      _showMessage('Please confirm password');
-      return;
-    }
-    if (password != confirm) {
-      _showMessage("Passwords don't match");
-      return;
-    }
+    if (confirm.isEmpty)      { _showMessage('Please confirm password'); return; }
+    if (password != confirm)  { _showMessage("Passwords don't match");   return; }
 
     setState(() => _loading = true);
 
     try {
+      // 1. Get location before creating the account
       final pos = await _requireLocationAndGet();
 
-      final res = await Supabase.instance.client.auth.signUp(
-        email: email,
-        password: password,
+      // 2. Create auth user in Supabase
+      final res  = await Supabase.instance.client.auth.signUp(
+        email: email, password: password,
       );
-
       final user = res.user;
 
+      // Email confirmation required — user not immediately available
       if (user == null) {
         _showMessage(
           'Check your email to confirm your account, then log in.',
@@ -226,14 +212,15 @@ class _SignupPageState extends State<SignupPage> {
         return;
       }
 
+      // 3. Save user profile to the users table
       await Supabase.instance.client.from('users').upsert({
-        'user_id': user.id,
-        'username': username,
-        'phone_number': _fullPhone,
-        'location': null,
-        'avatar_url': _defaultAvatarUrl,
-        'latitude': pos.latitude,
-        'longitude': pos.longitude,
+        'user_id':       user.id,
+        'username':      username,
+        'phone_number':  _fullPhone,
+        'location':      null,
+        'avatar_url':    _defaultAvatarUrl,
+        'latitude':      pos.latitude,
+        'longitude':     pos.longitude,
         'energy_source': _energySource,
         'has_solar_panels': _hasSolarPanels,
       });
@@ -246,6 +233,7 @@ class _SignupPageState extends State<SignupPage> {
         context,
         MaterialPageRoute(builder: (_) => const LoginPage()),
       );
+
     } on AuthException catch (e) {
       final msg = e.message.toLowerCase();
       if (msg.contains('already') || msg.contains('registered') || msg.contains('exists')) {
@@ -315,9 +303,9 @@ class _SignupPageState extends State<SignupPage> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(18),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.06),
+                            color: Colors.white.withValues(alpha: 0.06),
                             borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: Colors.white.withOpacity(0.06)),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,6 +320,7 @@ class _SignupPageState extends State<SignupPage> {
                               ),
                               const SizedBox(height: 6),
 
+                              // Link to LoginPage
                               Row(
                                 children: [
                                   const Text(
@@ -339,12 +328,10 @@ class _SignupPageState extends State<SignupPage> {
                                     style: TextStyle(color: AppColors.textSecondary),
                                   ),
                                   GestureDetector(
-                                    onTap: () {
-                                      Navigator.pushReplacement(
-                                        context,
-                                        MaterialPageRoute(builder: (_) => const LoginPage()),
-                                      );
-                                    },
+                                    onTap: () => Navigator.pushReplacement(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const LoginPage()),
+                                    ),
                                     child: const Text(
                                       'Login',
                                       style: TextStyle(
@@ -358,111 +345,80 @@ class _SignupPageState extends State<SignupPage> {
 
                               const SizedBox(height: _gap18),
 
-                              _field(
-                                TextField(
-                                  controller: _usernameC,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  cursorColor: Colors.white,
-                                  decoration: InputDecoration(
-                                    hintText: 'Username',
-                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                    prefixIcon: const Icon(Icons.person_outline),
-                                  ),
+                              // Username field
+                              _field(TextField(
+                                controller: _usernameC,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                cursorColor: Colors.white,
+                                decoration: InputDecoration(
+                                  hintText: 'Username',
+                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                                  prefixIcon: const Icon(Icons.person_outline),
                                 ),
-                              ),
+                              )),
                               const SizedBox(height: _gap16),
 
-                              _field(
-                                TextField(
-                                  controller: _emailC,
-                                  keyboardType: TextInputType.emailAddress,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  cursorColor: Colors.white,
-                                  decoration: InputDecoration(
-                                    hintText: 'Email address',
-                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                    prefixIcon: const Icon(Icons.email_outlined),
-                                  ),
+                              // Email field
+                              _field(TextField(
+                                controller: _emailC,
+                                keyboardType: TextInputType.emailAddress,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                cursorColor: Colors.white,
+                                decoration: InputDecoration(
+                                  hintText: 'Email address',
+                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                                  prefixIcon: const Icon(Icons.email_outlined),
                                 ),
-                              ),
+                              )),
                               const SizedBox(height: _gap16),
 
-                              _field(
-                                IntlPhoneField(
-                                  initialCountryCode: 'SA',
-                                  keyboardType: TextInputType.phone,
-                                  // ✅ NEW: prevent letters/symbols (digits only)
-                                  inputFormatters:  [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                  ],
-                                  cursorColor: Colors.white,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                  dropdownTextStyle: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                  dropdownIcon: Icon(
-                                    Icons.keyboard_arrow_down,
-                                    color: Colors.white.withOpacity(0.6),
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: 'Phone number',
-                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                    prefixIcon: const Icon(Icons.phone_outlined),
-                                  ),
-                                  onChanged: (phone) {
-                                    _fullPhone = phone.completeNumber;
-                                    _isPhoneValid = phone.isValidNumber();
-                                  },
+                              // Phone field with country code picker (digits only)
+                              _field(IntlPhoneField(
+                                initialCountryCode: 'SA',
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                cursorColor: Colors.white,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                dropdownTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                dropdownIcon: Icon(Icons.keyboard_arrow_down, color: Colors.white.withValues(alpha: 0.6)),
+                                decoration: InputDecoration(
+                                  hintText: 'Phone number',
+                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                                  prefixIcon: const Icon(Icons.phone_outlined),
                                 ),
-                              ),
+                                onChanged: (phone) {
+                                  _fullPhone   = phone.completeNumber;
+                                  _isPhoneValid = phone.isValidNumber();
+                                },
+                              )),
                               const SizedBox(height: _gap16),
 
-                              _field(
-                                Focus(
-                                  onFocusChange: (hasFocus) {
-                                    if (hasFocus) {
-                                      setState(() => _showPasswordRules = true);
-                                    }
-                                  },
-                                  child: TextField(
-                                    controller: _passwordC,
-                                    obscureText: _obscurePassword,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    cursorColor: Colors.white,
-                                    decoration: InputDecoration(
-                                      hintText: 'Password',
-                                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                      prefixIcon: const Icon(Icons.lock_outline),
-                                      suffixIcon: IconButton(
-                                        onPressed: () =>
-                                            setState(() => _obscurePassword = !_obscurePassword),
-                                        icon: Icon(
-                                          _obscurePassword
-                                              ? Icons.visibility_off_outlined
-                                              : Icons.visibility_outlined,
-                                          color: _obscurePassword
-                                              ? Colors.white54
-                                              : AppColors.button,
-                                        ),
+                              // Password field — shows strength rules on focus
+                              _field(Focus(
+                                onFocusChange: (hasFocus) {
+                                  if (hasFocus) setState(() => _showPasswordRules = true);
+                                },
+                                child: TextField(
+                                  controller: _passwordC,
+                                  obscureText: _obscurePassword,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                  cursorColor: Colors.white,
+                                  decoration: InputDecoration(
+                                    hintText: 'Password',
+                                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                                    prefixIcon: const Icon(Icons.lock_outline),
+                                    suffixIcon: IconButton(
+                                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                      icon: Icon(
+                                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                        color: _obscurePassword ? Colors.white54 : AppColors.button,
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
+                              )),
 
+                              // Animated password strength checklist
                               AnimatedCrossFade(
                                 firstChild: const SizedBox(height: 0),
                                 secondChild: Padding(
@@ -481,58 +437,47 @@ class _SignupPageState extends State<SignupPage> {
 
                               const SizedBox(height: _gap16),
 
-                              _field(
-                                TextField(
-                                  controller: _confirmPasswordC,
-                                  obscureText: _obscureConfirmPassword,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  cursorColor: Colors.white,
-                                  decoration: InputDecoration(
-                                    hintText: 'Confirm password',
-                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    suffixIcon: IconButton(
-                                      onPressed: () => setState(() =>
-                                          _obscureConfirmPassword = !_obscureConfirmPassword),
-                                      icon: Icon(
-                                        _obscureConfirmPassword
-                                            ? Icons.visibility_off_outlined
-                                            : Icons.visibility_outlined,
-                                        color: _obscureConfirmPassword
-                                            ? Colors.white54
-                                            : AppColors.button,
-                                      ),
+                              // Confirm password field
+                              _field(TextField(
+                                controller: _confirmPasswordC,
+                                obscureText: _obscureConfirmPassword,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                cursorColor: Colors.white,
+                                decoration: InputDecoration(
+                                  hintText: 'Confirm password',
+                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                                  prefixIcon: const Icon(Icons.lock_outline),
+                                  suffixIcon: IconButton(
+                                    onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                                    icon: Icon(
+                                      _obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                      color: _obscureConfirmPassword ? Colors.white54 : AppColors.button,
                                     ),
                                   ),
                                 ),
-                              ),
+                              )),
 
                               const SizedBox(height: _gap18),
 
+                              // Energy source selection
                               const Text(
                                 'Energy Source Type',
-                                style: TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(height: _gap12),
-
                               _buildEnergyOption('Grid only'),
                               const SizedBox(height: 10),
                               _buildEnergyOption('Grid + Solar'),
 
                               const SizedBox(height: _gap18),
 
+                              // Solar panel question — shown only for Grid + Solar users
                               if (_energySource == 'Grid + Solar') ...[
                                 _buildSolarPanelSelection(),
                                 const SizedBox(height: _gap18),
                               ],
 
+                              // Submit button
                               SizedBox(
                                 width: double.infinity,
                                 height: 55,
@@ -546,10 +491,7 @@ class _SignupPageState extends State<SignupPage> {
                                         )
                                       : const Text(
                                           'Create Account',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w800,
-                                          ),
+                                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                                         ),
                                 ),
                               ),
@@ -571,11 +513,13 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
+  /// Wraps a field in a minimum-height container for consistent layout.
   Widget _field(Widget child) => ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 50),
         child: child,
       );
 
+  /// Builds a selectable energy source option (Grid only / Grid + Solar).
   Widget _buildEnergyOption(String title) {
     final bool isSelected = _energySource == title;
 
@@ -586,38 +530,31 @@ class _SignupPageState extends State<SignupPage> {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppColors.button.withOpacity(0.22)
-              : Colors.white.withOpacity(0.06),
+              ? AppColors.button.withValues(alpha: 0.22)
+              : Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? AppColors.button : Colors.transparent,
-          ),
+          border: Border.all(color: isSelected ? AppColors.button : Colors.transparent),
         ),
         child: Row(
           children: [
             Icon(
               isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: isSelected ? AppColors.button : Colors.white.withOpacity(0.45),
+              color: isSelected ? AppColors.button : Colors.white.withValues(alpha: 0.45),
             ),
             const SizedBox(width: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
     );
   }
 
+  /// Builds the Yes/No solar panel question shown for Grid + Solar users.
   Widget _buildSolarPanelSelection() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -625,70 +562,44 @@ class _SignupPageState extends State<SignupPage> {
         children: [
           const Text(
             'Do you have solar panels installed?',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _hasSolarPanels = true),
-                  child: Container(
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: _hasSolarPanels
-                          ? AppColors.button
-                          : Colors.white.withOpacity(0.10),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'Yes',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-              ),
+              Expanded(child: _panelButton('Yes', selected: _hasSolarPanels,  onTap: () => setState(() => _hasSolarPanels = true))),
               const SizedBox(width: 12),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _hasSolarPanels = false),
-                  child: Container(
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: !_hasSolarPanels
-                          ? AppColors.button
-                          : Colors.white.withOpacity(0.10),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'No',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-              ),
+              Expanded(child: _panelButton('No',  selected: !_hasSolarPanels, onTap: () => setState(() => _hasSolarPanels = false))),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             'Enables solar monitoring and predictions.',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.45),
-              fontSize: 11,
-            ),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
           ),
         ],
       ),
     );
   }
+
+  Widget _panelButton(String label, {required bool selected, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: selected ? AppColors.button : Colors.white.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
 }
 
+/// Displays live password strength requirements as the user types.
+/// Each rule shows a green check when satisfied, red cancel when not.
 class _PasswordRules extends StatelessWidget {
   const _PasswordRules({
     required this.min8,
@@ -704,7 +615,7 @@ class _PasswordRules extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _ruleRow(min8, 'At least 8 characters'),
+        _ruleRow(min8,      'At least 8 characters'),
         const SizedBox(height: 6),
         _ruleRow(hasNumber, 'Contains a number (0-9)'),
         const SizedBox(height: 6),
@@ -726,7 +637,7 @@ class _PasswordRules extends StatelessWidget {
           child: Text(
             text,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
+              color: Colors.white.withValues(alpha: 0.8),
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -735,4 +646,3 @@ class _PasswordRules extends StatelessWidget {
       ],
     );
   }
-}

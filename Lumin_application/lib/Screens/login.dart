@@ -6,6 +6,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../Widgets/gradient_background.dart';
 import '../theme/app_colors.dart';
 
+/// Login screen — allows existing users to sign in with email and password.
+///
+/// Features:
+/// - Email format validation before submitting
+/// - Password visibility toggle
+/// - Friendly error messages for common Supabase auth errors
+/// - Password reset via email
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -15,10 +22,10 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _emailC = TextEditingController();
-  final _passC = TextEditingController();
+  final _passC  = TextEditingController();
 
   bool _obscurePassword = true;
-  bool _loading = false;
+  bool _loading         = false;
 
   static const double _gap12 = 12;
   static const double _gap20 = 20;
@@ -30,13 +37,13 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  // ✅ Your styled in-app message (SnackBar)
+  /// Shows a styled floating SnackBar with an error or success style.
   void _showMessage(String message, {bool isError = true}) {
     final snackBar = SnackBar(
       behavior: SnackBarBehavior.floating,
       elevation: 8,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      backgroundColor: const Color(0xFF0F2A33), // dark teal
+      backgroundColor: const Color(0xFF0F2A33),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
@@ -71,43 +78,40 @@ class _LoginPageState extends State<LoginPage> {
       ..showSnackBar(snackBar);
   }
 
-  // ✅ Simple email format check (optional but nice UX)
+  /// Basic email format check before sending to Supabase.
   bool _isValidEmail(String email) {
     final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
     return emailRegex.hasMatch(email);
   }
 
+  /// Maps Supabase AuthException messages to user-friendly strings.
   String _friendlyLoginError(AuthException e) {
     final m = e.message.toLowerCase();
 
-    // Supabase often returns generic messages for security
     if (m.contains('invalid login credentials') ||
         m.contains('invalid') ||
         m.contains('credentials')) {
       return 'Email or password is incorrect.';
     }
-
     if (m.contains('email not confirmed')) {
       return 'Please verify your email address first (check your inbox/spam).';
     }
-
     if (m.contains('too many requests')) {
       return 'Too many attempts. Please wait a moment and try again.';
     }
 
-    // fallback
     return 'Sign in failed. Please try again.';
   }
 
+  /// Validates inputs, signs the user in, and navigates to HomePage.
   Future<void> _login() async {
     final email = _emailC.text.trim();
-    final pass = _passC.text;
+    final pass  = _passC.text;
 
     if (email.isEmpty || pass.isEmpty) {
       _showMessage('Please enter your email and password.');
       return;
     }
-
     if (!_isValidEmail(email)) {
       _showMessage('Please enter a valid email address.');
       return;
@@ -145,6 +149,8 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  /// Sends a password reset email if the address is registered.
+  /// Uses a neutral message to prevent email enumeration.
   Future<void> _resetPassword() async {
     final email = _emailC.text.trim();
 
@@ -152,7 +158,6 @@ class _LoginPageState extends State<LoginPage> {
       _showMessage('Please enter your email first.');
       return;
     }
-
     if (!_isValidEmail(email)) {
       _showMessage('Please enter a valid email address.');
       return;
@@ -204,7 +209,6 @@ class _LoginPageState extends State<LoginPage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Image.asset('assets/images/Lumin_logo.png', height: 120),
-
                   const SizedBox(height: 20),
 
                   const Text(
@@ -217,18 +221,15 @@ class _LoginPageState extends State<LoginPage> {
                       height: 1.15,
                     ),
                   ),
-
                   const SizedBox(height: 10),
 
+                  // Link to SignupPage
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Text(
                         "Don't have an account? ",
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
                       ),
                       GestureDetector(
                         onTap: () => Navigator.push(
@@ -246,18 +247,14 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: _gap20),
 
-                  // Email
+                  // Email field
                   _field(
                     TextField(
                       controller: _emailC,
                       keyboardType: TextInputType.emailAddress,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                       cursorColor: Colors.white,
                       decoration: const InputDecoration(
                         hintText: 'Email address',
@@ -266,18 +263,14 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: _gap12),
 
-                  // Password
+                  // Password field with visibility toggle
                   _field(
                     TextField(
                       controller: _passC,
                       obscureText: _obscurePassword,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                       cursorColor: Colors.white,
                       decoration: InputDecoration(
                         hintText: 'Password',
@@ -290,24 +283,22 @@ class _LoginPageState extends State<LoginPage> {
                             _obscurePassword
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
-                            color: _obscurePassword
-                                ? Colors.white54
-                                : AppColors.button,
+                            color: _obscurePassword ? Colors.white54 : AppColors.button,
                           ),
                         ),
                       ),
                     ),
                   ),
-
                   const SizedBox(height: _gap12),
 
+                  // Forgot password link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         'Forgot password? ',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
+                          color: Colors.white.withValues(alpha: 0.7),
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                         ),
@@ -326,9 +317,9 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: _gap20),
 
+                  // Login button
                   SizedBox(
                     width: double.infinity,
                     height: 55,
@@ -338,14 +329,14 @@ class _LoginPageState extends State<LoginPage> {
                           ? const SizedBox(
                               width: 22,
                               height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2,color: AppColors.mint,),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.mint,
+                              ),
                             )
                           : const Text(
                               'Log In',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                             ),
                     ),
                   ),
@@ -358,5 +349,6 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  /// Wraps a field widget in a fixed-height container for consistent spacing.
   Widget _field(Widget child) => SizedBox(height: 50, child: child);
 }
