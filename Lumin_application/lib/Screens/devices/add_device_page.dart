@@ -39,6 +39,8 @@ class _AddDevicePageState extends State<AddDevicePage> {
     return raw.trim();
   }
 
+  // Opens the setup flow and saves the new device.
+  // Handles device creation failures and shows a clear message to the user.
   Future<void> _openSetupAndSave() async {
     if (_loading) return;
     setState(() => _loading = true);
@@ -102,9 +104,9 @@ class _AddDevicePageState extends State<AddDevicePage> {
 
       // Unknown return type
       _snack('Setup finished, but could not read device info.');
-    } catch (e) {
+    } on DeviceCreateException catch (error) {
       if (!mounted) return;
-      _snack('Error: $e');
+      _snack('Error: ${error.message}');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

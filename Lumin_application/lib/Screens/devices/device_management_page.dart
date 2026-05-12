@@ -49,7 +49,9 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     super.dispose();
   }
 
-  // ✅ 4. دالة جلب الأجهزة من الباك إند وتحويلها إلى شكل DeviceItem الخاص بكم
+  // Loads the user's devices from the backend and updates their latest readings.
+  // Handles device loading failures, and if the latest reading cannot be fetched,
+  // it keeps the current reading already available from the device table.
   Future<void> _fetchDevicesFromApi() async {
     setState(() {
       _isLoading = true;
@@ -79,7 +81,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
             currentReading = _toDouble(readingValue);
             latestValue = '${currentReading.toStringAsFixed(2)} kW';
           }
-        } catch (_) {
+        } on LatestDeviceReadingException {
           // Keep the current reading value from the device table.
         }
 
@@ -101,10 +103,10 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } on DeviceLoadException catch (error) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = error.message;
           _isLoading = false;
         });
       }
@@ -125,6 +127,8 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     }).toList();
   }
 
+  // Applies edited device settings and refreshes the displayed device card.
+  // Handles update failures and informs the user without interrupting the page flow.
   Future<void> _applyDeviceEdits(
     DeviceItem d,
     Map<String, dynamic> updated,
@@ -168,14 +172,18 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Device settings updated')));
-    } catch (e) {
+    } on DeviceUpdateException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update device settings: $e')),
+        SnackBar(
+          content: Text('Failed to update device settings: ${error.message}'),
+        ),
       );
     }
   }
 
+  // Confirms and deletes the selected device from the user's device list.
+  // Handles deletion failures and shows an error message if the request does not succeed.
   Future<void> _confirmDelete(DeviceItem d) async {
     // ✅ مهم: استخدمي context الحالي قبل أي pop
     final result = await showDialog<bool>(
@@ -231,7 +239,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     try {
       await _apiService.deleteDevice(d.deviceId);
       setState(() => _devices.remove(d));
-    } catch (e) {
+    } on DeviceDeleteException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

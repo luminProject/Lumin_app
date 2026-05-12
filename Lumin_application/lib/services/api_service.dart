@@ -4,6 +4,60 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+class DeviceLoadException implements Exception {
+  final String message;
+  const DeviceLoadException([this.message = 'Failed to load devices']);
+
+  @override
+  String toString() => message;
+}
+
+class DeviceCreateException implements Exception {
+  final String message;
+  const DeviceCreateException([this.message = 'Failed to add device']);
+
+  @override
+  String toString() => message;
+}
+
+class DeviceDeleteException implements Exception {
+  final String message;
+  const DeviceDeleteException([this.message = 'Failed to delete device']);
+
+  @override
+  String toString() => message;
+}
+
+class DeviceUpdateException implements Exception {
+  final String message;
+  const DeviceUpdateException([
+    this.message = 'Failed to update device settings',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
+class DeviceReadingsException implements Exception {
+  final String message;
+  const DeviceReadingsException([
+    this.message = 'Failed to load device readings',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
+class LatestDeviceReadingException implements Exception {
+  final String message;
+  const LatestDeviceReadingException([
+    this.message = 'Failed to load latest reading',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
 /// ApiService handles all HTTP requests to the FastAPI backend.
 ///
 /// Important:
@@ -52,6 +106,7 @@ class ApiService {
     if (json) headers['Content-Type'] = 'application/json';
     return headers;
   }
+
   void _logApiError(String label, http.Response response) {
     debugPrint('$label failed');
     debugPrint('Status: ${response.statusCode}');
@@ -100,8 +155,7 @@ class ApiService {
 
     return fallback;
   }
-  
-  
+
   // ===== Devices =====
 
   /// GET /devices/{userId}
@@ -111,7 +165,7 @@ class ApiService {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'] ?? [];
     } else {
-      throw Exception('Failed to load devices');
+      throw const DeviceLoadException();
     }
   }
 
@@ -136,7 +190,7 @@ class ApiService {
       body: json.encode(body),
     );
     if (response.statusCode != 200 && response.statusCode != 201) {
-      throw Exception('Failed to add device');
+      throw const DeviceCreateException();
     }
   }
 
@@ -144,7 +198,7 @@ class ApiService {
   Future<void> deleteDevice(int deviceId) async {
     final response = await http.delete(Uri.parse('$baseUrl/devices/$deviceId'));
     if (response.statusCode != 200) {
-      throw Exception('Failed to delete device');
+      throw const DeviceDeleteException();
     }
   }
 
@@ -172,7 +226,7 @@ class ApiService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Failed to update device settings');
+      throw const DeviceUpdateException();
     }
   }
 
@@ -186,7 +240,7 @@ class ApiService {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'] ?? [];
     } else {
-      throw Exception('Failed to load device readings');
+      throw const DeviceReadingsException();
     }
   }
 
@@ -200,7 +254,7 @@ class ApiService {
       final jsonResponse = json.decode(response.body);
       return jsonResponse['data'] as Map<String, dynamic>?;
     } else {
-      throw Exception('Failed to load latest reading');
+      throw const LatestDeviceReadingException();
     }
   }
 
@@ -468,5 +522,4 @@ class ApiService {
   Future<void> updateAvatarUrl(String userId, String avatarUrl) async {
     await updateProfile(userId, {'avatar_url': avatarUrl});
   }
-
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
@@ -16,14 +17,21 @@ class DevicesSection extends StatefulWidget {
 class _DevicesSectionState extends State<DevicesSection>
     with SingleTickerProviderStateMixin {
   final ApiService _apiService = ApiService();
-  late Future<List<_DeviceItem>> _devicesFuture;
+  Timer? _devicesRefreshTimer;
   TabController? _tabs;
   List<String> _currentRooms = const [];
+  List<_DeviceItem> _devices = const [];
+  bool _isInitialLoading = true;
+  Object? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _devicesFuture = _loadDevices();
+    _refreshDevices();
+    _devicesRefreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _refreshDevices(),
+    );
   }
 
   Future<List<_DeviceItem>> _loadDevices() async {
@@ -35,10 +43,24 @@ class _DevicesSectionState extends State<DevicesSection>
         .toList();
   }
 
-  void _refreshDevices() {
-    setState(() {
-      _devicesFuture = _loadDevices();
-    });
+  // Refreshes the Home devices list without reloading the whole section.
+  // Handles loading failures while keeping the current UI stable.
+  Future<void> _refreshDevices() async {
+    try {
+      final devices = await _loadDevices();
+      if (!mounted) return;
+      setState(() {
+        _devices = devices;
+        _isInitialLoading = false;
+        _loadError = null;
+      });
+    } on DeviceLoadException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isInitialLoading = false;
+        _loadError = error;
+      });
+    }
   }
 
   void _syncTabs(List<String> rooms) {
@@ -105,6 +127,7 @@ class _DevicesSectionState extends State<DevicesSection>
 
   @override
   void dispose() {
+    _devicesRefreshTimer?.cancel();
     _tabs?.dispose();
     super.dispose();
   }
@@ -144,76 +167,69 @@ class _DevicesSectionState extends State<DevicesSection>
           ],
         ),
         const SizedBox(height: 10),
-        FutureBuilder<List<_DeviceItem>>(
-          future: _devicesFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return SizedBox(
-                height: widget.height + 56,
-                child: const Center(
-                  child: CircularProgressIndicator(color: AppColors.mint),
-                ),
-              );
-            }
+        if (_isInitialLoading)
+          SizedBox(
+            height: widget.height + 56,
+            child: const Center(
+              child: CircularProgressIndicator(color: AppColors.mint),
+            ),
+          )
+        else if (_loadError != null && _devices.isEmpty)
+          _DevicesMessage(
+            height: widget.height + 56,
+            icon: Icons.wifi_off_rounded,
+            title: 'Unable to load devices',
+            subtitle: 'Check the backend connection, then refresh.',
+            actionLabel: 'Retry',
+            onAction: _refreshDevices,
+          )
+        else if (_devices.isEmpty)
+          _DevicesMessage(
+            height: widget.height + 56,
+            icon: Icons.devices_other_rounded,
+            title: 'No devices yet',
+            subtitle:
+                'Added devices will appear here with their current reading.',
+            actionLabel: 'Add device',
+            onAction: widget.onSeeAll,
+          )
+        else
+          Builder(
+            builder: (context) {
+              final roomDevices = _groupDevicesByRoom(_devices);
+              final rooms = roomDevices.keys.toList();
+              _syncTabs(rooms);
 
-            if (snapshot.hasError) {
-              return _DevicesMessage(
-                height: widget.height + 56,
-                icon: Icons.wifi_off_rounded,
-                title: 'Unable to load devices',
-                subtitle: 'Check the backend connection, then refresh.',
-                actionLabel: 'Retry',
-                onAction: _refreshDevices,
-              );
-            }
-
-            final devices = snapshot.data ?? const <_DeviceItem>[];
-            if (devices.isEmpty) {
-              return _DevicesMessage(
-                height: widget.height + 56,
-                icon: Icons.devices_other_rounded,
-                title: 'No devices yet',
-                subtitle:
-                    'Added devices will appear here with their current reading.',
-                actionLabel: 'Add device',
-                onAction: widget.onSeeAll,
-              );
-            }
-
-            final roomDevices = _groupDevicesByRoom(devices);
-            final rooms = roomDevices.keys.toList();
-            _syncTabs(rooms);
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TabBar(
-                  controller: _tabs,
-                  isScrollable: true,
-                  indicatorColor: AppColors.mint,
-                  labelColor: AppColors.text,
-                  unselectedLabelColor: AppColors.sub,
-                  tabs: rooms.map((room) => Tab(text: room)).toList(),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: widget.height,
-                  child: TabBarView(
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TabBar(
                     controller: _tabs,
-                    children: rooms.map((roomName) {
-                      final devices =
-                          roomDevices[roomName] ?? const <_DeviceItem>[];
-                      if (devices.isEmpty) {
-                        return _EmptyRoomDevices(roomName: roomName);
-                      }
-                      return _RoomDevicesHorizontalList(devices: devices);
-                    }).toList(),
+                    isScrollable: true,
+                    indicatorColor: AppColors.mint,
+                    labelColor: AppColors.text,
+                    unselectedLabelColor: AppColors.sub,
+                    tabs: rooms.map((room) => Tab(text: room)).toList(),
                   ),
-                ),
-              ],
-            );
-          },
-        ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: widget.height,
+                    child: TabBarView(
+                      controller: _tabs,
+                      children: rooms.map((roomName) {
+                        final devices =
+                            roomDevices[roomName] ?? const <_DeviceItem>[];
+                        if (devices.isEmpty) {
+                          return _EmptyRoomDevices(roomName: roomName);
+                        }
+                        return _RoomDevicesHorizontalList(devices: devices);
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
       ],
     );
   }

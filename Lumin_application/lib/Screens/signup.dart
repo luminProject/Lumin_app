@@ -20,25 +20,25 @@ class SignupPage extends StatefulWidget {
 }
 
 class _SignupPageState extends State<SignupPage> {
-  final _usernameC        = TextEditingController();
-  final _emailC           = TextEditingController();
-  final _passwordC        = TextEditingController();
+  final _usernameC = TextEditingController();
+  final _emailC = TextEditingController();
+  final _passwordC = TextEditingController();
   final _confirmPasswordC = TextEditingController();
 
-  bool _obscurePassword        = true;
+  bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
   String _energySource = 'Grid + Solar';
-  bool   _hasSolarPanels = true;
+  bool _hasSolarPanels = true;
 
-  String _fullPhone   = '';
-  bool   _isPhoneValid = false;
-  bool   _loading      = false;
+  String _fullPhone = '';
+  bool _isPhoneValid = false;
+  bool _loading = false;
 
   // Live password strength rules
-  bool _pwMin8          = false;
-  bool _pwHasNumber     = false;
-  bool _pwHasSymbol     = false;
+  bool _pwMin8 = false;
+  bool _pwHasNumber = false;
+  bool _pwHasSymbol = false;
   bool _showPasswordRules = false;
 
   static const double _gap12 = 12;
@@ -115,13 +115,17 @@ class _SignupPageState extends State<SignupPage> {
   void _updatePasswordRules() {
     final p = _passwordC.text;
 
-    final min8      = p.length >= 8;
+    final min8 = p.length >= 8;
     final hasNumber = RegExp(r'\d').hasMatch(p);
-    final hasSymbol = RegExp(r'[!@#$%^&*(),.?":{}|<>_\-\\/\[\]=+;`~]').hasMatch(p);
+    final hasSymbol = RegExp(
+      r'[!@#$%^&*(),.?":{}|<>_\-\\/\[\]=+;`~]',
+    ).hasMatch(p);
 
-    if (min8 != _pwMin8 || hasNumber != _pwHasNumber || hasSymbol != _pwHasSymbol) {
+    if (min8 != _pwMin8 ||
+        hasNumber != _pwHasNumber ||
+        hasSymbol != _pwHasSymbol) {
       setState(() {
-        _pwMin8      = min8;
+        _pwMin8 = min8;
         _pwHasNumber = hasNumber;
         _pwHasSymbol = hasSymbol;
       });
@@ -155,24 +159,40 @@ class _SignupPageState extends State<SignupPage> {
       );
     }
 
-    return Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    return Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
   }
 
   /// Validates all fields, creates the Supabase auth user,
   /// saves the profile row, then navigates to LoginPage.
   Future<void> _createAccount() async {
     final username = _usernameC.text.trim();
-    final email    = _emailC.text.trim();
+    final email = _emailC.text.trim();
     final password = _passwordC.text;
-    final confirm  = _confirmPasswordC.text;
+    final confirm = _confirmPasswordC.text;
 
     // Input validation
-    if (username.isEmpty) { _showMessage('Please enter username'); return; }
-    if (email.isEmpty)    { _showMessage('Please enter email');    return; }
-    if (!_isValidEmail(email)) { _showMessage('Please enter a valid email'); return; }
-    if (_fullPhone.trim().isEmpty) { _showMessage('Please enter phone number'); return; }
+    if (username.isEmpty) {
+      _showMessage('Please enter username');
+      return;
+    }
+    if (email.isEmpty) {
+      _showMessage('Please enter email');
+      return;
+    }
+    if (!_isValidEmail(email)) {
+      _showMessage('Please enter a valid email');
+      return;
+    }
+    if (_fullPhone.trim().isEmpty) {
+      _showMessage('Please enter phone number');
+      return;
+    }
     if (!_isPhoneValid) {
-      _showMessage('Please enter a valid phone number for the selected country.');
+      _showMessage(
+        'Please enter a valid phone number for the selected country.',
+      );
       return;
     }
 
@@ -182,14 +202,23 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
-    if (password.isEmpty) { _showMessage('Please enter password'); return; }
+    if (password.isEmpty) {
+      _showMessage('Please enter password');
+      return;
+    }
     if (!_isPasswordStrong) {
       setState(() => _showPasswordRules = true);
       _showMessage('Please use a stronger password (see requirements below).');
       return;
     }
-    if (confirm.isEmpty)      { _showMessage('Please confirm password'); return; }
-    if (password != confirm)  { _showMessage("Passwords don't match");   return; }
+    if (confirm.isEmpty) {
+      _showMessage('Please confirm password');
+      return;
+    }
+    if (password != confirm) {
+      _showMessage("Passwords don't match");
+      return;
+    }
 
     setState(() => _loading = true);
 
@@ -198,8 +227,9 @@ class _SignupPageState extends State<SignupPage> {
       final pos = await _requireLocationAndGet();
 
       // 2. Create auth user in Supabase
-      final res  = await Supabase.instance.client.auth.signUp(
-        email: email, password: password,
+      final res = await Supabase.instance.client.auth.signUp(
+        email: email,
+        password: password,
       );
       final user = res.user;
 
@@ -214,13 +244,13 @@ class _SignupPageState extends State<SignupPage> {
 
       // 3. Save user profile to the users table
       await Supabase.instance.client.from('users').upsert({
-        'user_id':       user.id,
-        'username':      username,
-        'phone_number':  _fullPhone,
-        'location':      null,
-        'avatar_url':    _defaultAvatarUrl,
-        'latitude':      pos.latitude,
-        'longitude':     pos.longitude,
+        'user_id': user.id,
+        'username': username,
+        'phone_number': _fullPhone,
+        'location': null,
+        'avatar_url': _defaultAvatarUrl,
+        'latitude': pos.latitude,
+        'longitude': pos.longitude,
         'energy_source': _energySource,
         'has_solar_panels': _hasSolarPanels,
       });
@@ -233,11 +263,14 @@ class _SignupPageState extends State<SignupPage> {
         context,
         MaterialPageRoute(builder: (_) => const LoginPage()),
       );
-
     } on AuthException catch (e) {
       final msg = e.message.toLowerCase();
-      if (msg.contains('already') || msg.contains('registered') || msg.contains('exists')) {
-        _showMessage('This email is already registered. Please use another email.');
+      if (msg.contains('already') ||
+          msg.contains('registered') ||
+          msg.contains('exists')) {
+        _showMessage(
+          'This email is already registered. Please use another email.',
+        );
       } else if (msg.contains('too many requests')) {
         _showMessage('Too many attempts. Please wait a moment and try again.');
       } else if (msg.contains('weak password')) {
@@ -250,16 +283,24 @@ class _SignupPageState extends State<SignupPage> {
       if (msg.contains('duplicate') || msg.contains('unique')) {
         _showMessage('An account with this information already exists.');
       } else if (msg.contains('network') || msg.contains('connection')) {
-        _showMessage('Connection error. Please check your internet and try again.');
+        _showMessage(
+          'Connection error. Please check your internet and try again.',
+        );
       } else {
         _showMessage('Could not save your information. Please try again.');
       }
     } on Exception catch (e) {
       final msg = e.toString().replaceFirst('Exception: ', '');
-      if (msg.contains('Location') || msg.contains('location') || msg.contains('permission')) {
+      if (msg.contains('Location') ||
+          msg.contains('location') ||
+          msg.contains('permission')) {
         _showMessage(msg);
-      } else if (msg.contains('SocketException') || msg.contains('network') || msg.contains('connection')) {
-        _showMessage('No internet connection. Please check your network and try again.');
+      } else if (msg.contains('SocketException') ||
+          msg.contains('network') ||
+          msg.contains('connection')) {
+        _showMessage(
+          'No internet connection. Please check your network and try again.',
+        );
       } else if (msg.contains('TimeoutException') || msg.contains('timeout')) {
         _showMessage('Request timed out. Please try again.');
       } else {
@@ -305,7 +346,9 @@ class _SignupPageState extends State<SignupPage> {
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.06),
                             borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.06),
+                            ),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -325,12 +368,16 @@ class _SignupPageState extends State<SignupPage> {
                                 children: [
                                   const Text(
                                     'Already have an account? ',
-                                    style: TextStyle(color: AppColors.textSecondary),
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                    ),
                                   ),
                                   GestureDetector(
                                     onTap: () => Navigator.pushReplacement(
                                       context,
-                                      MaterialPageRoute(builder: (_) => const LoginPage()),
+                                      MaterialPageRoute(
+                                        builder: (_) => const LoginPage(),
+                                      ),
                                     ),
                                     child: const Text(
                                       'Login',
@@ -346,77 +393,137 @@ class _SignupPageState extends State<SignupPage> {
                               const SizedBox(height: _gap18),
 
                               // Username field
-                              _field(TextField(
-                                controller: _usernameC,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                                cursorColor: Colors.white,
-                                decoration: InputDecoration(
-                                  hintText: 'Username',
-                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                                  prefixIcon: const Icon(Icons.person_outline),
+                              _field(
+                                TextField(
+                                  controller: _usernameC,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  cursorColor: Colors.white,
+                                  decoration: InputDecoration(
+                                    hintText: 'Username',
+                                    hintStyle: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    ),
+                                    prefixIcon: const Icon(
+                                      Icons.person_outline,
+                                    ),
+                                  ),
                                 ),
-                              )),
+                              ),
                               const SizedBox(height: _gap16),
 
                               // Email field
-                              _field(TextField(
-                                controller: _emailC,
-                                keyboardType: TextInputType.emailAddress,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                                cursorColor: Colors.white,
-                                decoration: InputDecoration(
-                                  hintText: 'Email address',
-                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                                  prefixIcon: const Icon(Icons.email_outlined),
+                              _field(
+                                TextField(
+                                  controller: _emailC,
+                                  keyboardType: TextInputType.emailAddress,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  cursorColor: Colors.white,
+                                  decoration: InputDecoration(
+                                    hintText: 'Email address',
+                                    hintStyle: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    ),
+                                    prefixIcon: const Icon(
+                                      Icons.email_outlined,
+                                    ),
+                                  ),
                                 ),
-                              )),
+                              ),
                               const SizedBox(height: _gap16),
 
                               // Phone field with country code picker (digits only)
-                              _field(IntlPhoneField(
-                                initialCountryCode: 'SA',
-                                keyboardType: TextInputType.phone,
-                                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                cursorColor: Colors.white,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                                dropdownTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                                dropdownIcon: Icon(Icons.keyboard_arrow_down, color: Colors.white.withValues(alpha: 0.6)),
-                                decoration: InputDecoration(
-                                  hintText: 'Phone number',
-                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                                  prefixIcon: const Icon(Icons.phone_outlined),
+                              _field(
+                                IntlPhoneField(
+                                  initialCountryCode: 'SA',
+                                  keyboardType: TextInputType.phone,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                  ],
+                                  cursorColor: Colors.white,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  dropdownTextStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  dropdownIcon: Icon(
+                                    Icons.keyboard_arrow_down,
+                                    color: Colors.white.withValues(alpha: 0.6),
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: 'Phone number',
+                                    hintStyle: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    ),
+                                    prefixIcon: const Icon(
+                                      Icons.phone_outlined,
+                                    ),
+                                  ),
+                                  onChanged: (phone) {
+                                    _fullPhone = phone.completeNumber;
+                                    _isPhoneValid = phone.isValidNumber();
+                                  },
                                 ),
-                                onChanged: (phone) {
-                                  _fullPhone   = phone.completeNumber;
-                                  _isPhoneValid = phone.isValidNumber();
-                                },
-                              )),
+                              ),
                               const SizedBox(height: _gap16),
 
                               // Password field — shows strength rules on focus
-                              _field(Focus(
-                                onFocusChange: (hasFocus) {
-                                  if (hasFocus) setState(() => _showPasswordRules = true);
-                                },
-                                child: TextField(
-                                  controller: _passwordC,
-                                  obscureText: _obscurePassword,
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                                  cursorColor: Colors.white,
-                                  decoration: InputDecoration(
-                                    hintText: 'Password',
-                                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    suffixIcon: IconButton(
-                                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                                      icon: Icon(
-                                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                                        color: _obscurePassword ? Colors.white54 : AppColors.button,
+                              _field(
+                                Focus(
+                                  onFocusChange: (hasFocus) {
+                                    if (hasFocus)
+                                      setState(() => _showPasswordRules = true);
+                                  },
+                                  child: TextField(
+                                    controller: _passwordC,
+                                    obscureText: _obscurePassword,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    cursorColor: Colors.white,
+                                    decoration: InputDecoration(
+                                      hintText: 'Password',
+                                      hintStyle: TextStyle(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.5,
+                                        ),
+                                      ),
+                                      prefixIcon: const Icon(
+                                        Icons.lock_outline,
+                                      ),
+                                      suffixIcon: IconButton(
+                                        onPressed: () => setState(
+                                          () => _obscurePassword =
+                                              !_obscurePassword,
+                                        ),
+                                        icon: Icon(
+                                          _obscurePassword
+                                              ? Icons.visibility_off_outlined
+                                              : Icons.visibility_outlined,
+                                          color: _obscurePassword
+                                              ? Colors.white54
+                                              : AppColors.button,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              )),
+                              ),
 
                               // Animated password strength checklist
                               AnimatedCrossFade(
@@ -438,31 +545,51 @@ class _SignupPageState extends State<SignupPage> {
                               const SizedBox(height: _gap16),
 
                               // Confirm password field
-                              _field(TextField(
-                                controller: _confirmPasswordC,
-                                obscureText: _obscureConfirmPassword,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                                cursorColor: Colors.white,
-                                decoration: InputDecoration(
-                                  hintText: 'Confirm password',
-                                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                                  prefixIcon: const Icon(Icons.lock_outline),
-                                  suffixIcon: IconButton(
-                                    onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
-                                    icon: Icon(
-                                      _obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                                      color: _obscureConfirmPassword ? Colors.white54 : AppColors.button,
+                              _field(
+                                TextField(
+                                  controller: _confirmPasswordC,
+                                  obscureText: _obscureConfirmPassword,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  cursorColor: Colors.white,
+                                  decoration: InputDecoration(
+                                    hintText: 'Confirm password',
+                                    hintStyle: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    ),
+                                    prefixIcon: const Icon(Icons.lock_outline),
+                                    suffixIcon: IconButton(
+                                      onPressed: () => setState(
+                                        () => _obscureConfirmPassword =
+                                            !_obscureConfirmPassword,
+                                      ),
+                                      icon: Icon(
+                                        _obscureConfirmPassword
+                                            ? Icons.visibility_off_outlined
+                                            : Icons.visibility_outlined,
+                                        color: _obscureConfirmPassword
+                                            ? Colors.white54
+                                            : AppColors.button,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              )),
+                              ),
 
                               const SizedBox(height: _gap18),
 
                               // Energy source selection
                               const Text(
                                 'Energy Source Type',
-                                style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+                                style: TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                               const SizedBox(height: _gap12),
                               _buildEnergyOption('Grid only'),
@@ -487,11 +614,16 @@ class _SignupPageState extends State<SignupPage> {
                                       ? const SizedBox(
                                           width: 22,
                                           height: 22,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
                                         )
                                       : const Text(
                                           'Create Account',
-                                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w800,
+                                          ),
                                         ),
                                 ),
                               ),
@@ -513,12 +645,11 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
-
   /// Wraps a field in a minimum-height container for consistent layout.
   Widget _field(Widget child) => ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 50),
-        child: child,
-      );
+    constraints: const BoxConstraints(minHeight: 50),
+    child: child,
+  );
 
   /// Builds a selectable energy source option (Grid only / Grid + Solar).
   Widget _buildEnergyOption(String title) {
@@ -534,16 +665,26 @@ class _SignupPageState extends State<SignupPage> {
               ? AppColors.button.withValues(alpha: 0.22)
               : Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isSelected ? AppColors.button : Colors.transparent),
+          border: Border.all(
+            color: isSelected ? AppColors.button : Colors.transparent,
+          ),
         ),
         child: Row(
           children: [
             Icon(
               isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: isSelected ? AppColors.button : Colors.white.withValues(alpha: 0.45),
+              color: isSelected
+                  ? AppColors.button
+                  : Colors.white.withValues(alpha: 0.45),
             ),
             const SizedBox(width: 12),
-            Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),
@@ -563,37 +704,68 @@ class _SignupPageState extends State<SignupPage> {
         children: [
           const Text(
             'Do you have solar panels installed?',
-            style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _panelButton('Yes', selected: _hasSolarPanels,  onTap: () => setState(() => _hasSolarPanels = true))),
+              Expanded(
+                child: _panelButton(
+                  'Yes',
+                  selected: _hasSolarPanels,
+                  onTap: () => setState(() => _hasSolarPanels = true),
+                ),
+              ),
               const SizedBox(width: 12),
-              Expanded(child: _panelButton('No',  selected: !_hasSolarPanels, onTap: () => setState(() => _hasSolarPanels = false))),
+              Expanded(
+                child: _panelButton(
+                  'No',
+                  selected: !_hasSolarPanels,
+                  onTap: () => setState(() => _hasSolarPanels = false),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             'Enables solar monitoring and predictions.',
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.45),
+              fontSize: 11,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _panelButton(String label, {required bool selected, required VoidCallback onTap}) {
+  Widget _panelButton(
+    String label, {
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         height: 40,
         decoration: BoxDecoration(
-          color: selected ? AppColors.button : Colors.white.withValues(alpha: 0.10),
+          color: selected
+              ? AppColors.button
+              : Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(10),
         ),
         alignment: Alignment.center,
-        child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }
@@ -616,7 +788,7 @@ class _PasswordRules extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _ruleRow(min8,      'At least 8 characters'),
+        _ruleRow(min8, 'At least 8 characters'),
         const SizedBox(height: 6),
         _ruleRow(hasNumber, 'Contains a number (0-9)'),
         const SizedBox(height: 6),
@@ -647,4 +819,4 @@ class _PasswordRules extends StatelessWidget {
       ],
     );
   }
-  } 
+}
