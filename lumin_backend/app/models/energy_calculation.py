@@ -73,37 +73,38 @@ class EnergyCalculation(Observer):
         """Observer pattern — called when device data updates."""
         self.calculateEnergy()
 
-    # ── viewSummary — Sprint 2 stats chart ────────────────────
-    # Already declared in the class diagram as viewSummary(interval: Duration).
-    # Delegates to StatsService for aggregation logic.
-    # StatsService is an internal implementation detail — not a
-    # separate class in the diagram.
+    # ── SOLAR FORECAST — Statistics Chart ─────────────────────────────────────
+    # viewSummary() aggregates energycalculation rows for the Home screen chart.
+    # Called by the GET /stats/{user_id} endpoint via LuminFacade (not Solar Forecast).
+    # Included here because it reads solar_production from the same energycalculation
+    # table that Solar Forecast writes to — shared data source.
+    # Delegates to StatsService internally (not a separate diagram class).
 
     def viewSummary(self, interval: Any = None, anchor: str = None) -> dict:
         """
-        Return aggregated energy data for the Home screen statistics chart.
+        Returns aggregated solar and grid energy data for the Home screen chart.
 
-        Parameters
-        ----------
-        interval : str — "week" | "month" | "year"
-                   Maps to the chart tab the user selected.
-        anchor   : str — reference string for the time range:
-                   week  → YYYY-MM-DD
-                   month → YYYY-MM
-                   year  → YYYY
+            Input:
+            interval : str — "week" | "month" | "year"
+            anchor   : str — reference string:
+                        week  → YYYY-MM-DD (any day in the target week)
+                        month → YYYY-MM
+                        year  → YYYY
 
-        Returns
-        -------
-        dict with 'range' and 'points' keys for the Flutter chart widget.
+            Output:
+            {"range": str, "points": [{x, solar, grid, label}, ...]}
+            Returns {} if supabase, interval, or anchor is None.
 
-        Delegates to StatsService which contains the aggregation logic.
-        Called by LuminFacade.get_stats() endpoint.
+            Processing:
+            Delegates entirely to StatsService.get_stats().
+            StatsService reads solar_production and total_consumption from
+            the energycalculation table and aggregates by the requested range.
         """
         if self.supabase is None or interval is None or anchor is None:
             return {}
 
         # StatsService is used internally — not exposed as a separate class
-        from app.services.stats_service import StatsService
+        from app.core.stats_helper import StatsService
         stats = StatsService(self.supabase)
         return stats.get_stats(
             user_id=str(self.user_id),
@@ -111,6 +112,10 @@ class EnergyCalculation(Observer):
             anchor=anchor,
         )
 
+
+    # ── END OF SOLAR FORECAST ──────────────────────────────────────────────────
+    
+    
     # ── Bill prediction  ─────────────────────────────────
     # Called by LuminFacade for billing cycle calculations.
 

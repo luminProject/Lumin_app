@@ -92,16 +92,17 @@ class Notification:
         )
 
     # =========================================================
-    # Solar Forecast factories (Sprint 2)
-    # ---------------------------------------------------------
-    # Used by SolarForecastService and DeviceMonitor.
-    # Content embeds a dedup key as a suffix — stripped before
-    # display in the app. See Change Log v4, Section 3.16.
+    # SOLAR FORECAST — Solar Forecast Feature
+    #
+    # Three factory methods used by SolarForecast._send_notification().
+    # Each embeds a dedup key as a suffix in the content string.
+    # The key is stripped before display in Flutter (NotificationsPage
+    # uses replaceAll(RegExp(r'\s*#\w[\w-]*$')) to remove it).
     #
     # Dedup key formats:
-    #   forecast_ready   → #season_name_year  (e.g. #spring_2026)
-    #   device_warning   → #warn_YYYYMMDD
-    #   feature_disabled → #offline_since_YYYYMMDD
+    #   forecast_ready   → #{season}_{year}       e.g. #spring_2026
+    #   device_warning   → #warn_{YYYYMMDD}       e.g. #warn_20260501
+    #   feature_disabled → #offline_since_{YYYYMMDD}
     # =========================================================
 
     @classmethod
@@ -113,21 +114,23 @@ class Notification:
         season_key: str,
     ) -> "Notification":
         """
-        Create a forecast_ready notification.
-        Sent once per season when ≥ 45 days of previous-season data exist.
-        Dedup key: #{season_key} e.g. #spring_2026
+        Creates a forecast_ready notification.
 
-        Parameters
-        ----------
-        season     : str — e.g. "spring"
+        Input:
+        user_id    : str — target user UUID
+        season     : str — season name e.g. "spring"
         emoji      : str — season emoji e.g. "🌸"
-        season_key : str — e.g. "spring_2026"
+        season_key : str — dedup key suffix e.g. "spring_2026"
+
+        Output:
+        Notification with type='forecast_ready' and dedup key embedded in content.
+        Sent once per season when the previous season has ≥ 45 collected days.
         """
         cap     = season.capitalize()
         content = (
             f"Your {cap} {emoji} solar forecast is ready! "
             f"View your personalized production predictions "
-            f"for the next 2 years. #{season_key}"
+            f"for the next year. #{season_key}"
         )
         return cls(
             notification_id=None,
@@ -147,15 +150,17 @@ class Notification:
         feature_disable_days: int,
     ) -> "Notification":
         """
-        Create a device_warning notification.
-        Sent once per missed day (days 1–14).
-        Dedup key: #warn_YYYYMMDD
+        Creates a device_warning notification.
 
-        Parameters
-        ----------
-        days_offline         : int — number of consecutive offline days
-        today_str            : str — YYYYMMDD formatted string of today
-        feature_disable_days : int — threshold before forecast pauses (15)
+        Input:
+        user_id              : str — target user UUID
+        days_offline         : int — consecutive days without a solar reading
+        today_str            : str — today formatted as YYYYMMDD (used as dedup key)
+        feature_disable_days : int — days until forecast pauses (constant = 15)
+
+        Output:
+        Notification with type='device_warning' and dedup key #warn_{today_str}.
+        Sent once per day for days 1–14 of consecutive offline.
         """
         content = (
             f"No solar data received today. "
@@ -181,14 +186,17 @@ class Notification:
         last_reading_date_str: str,
     ) -> "Notification":
         """
-        Create a feature_disabled notification.
-        Sent once per offline cycle when days_offline ≥ 15.
-        Dedup key: #offline_since_YYYYMMDD
+        Creates a feature_disabled notification.
 
-        Parameters
-        ----------
-        days_offline           : int — total consecutive offline days
-        last_reading_date_str  : str — YYYYMMDD of last known reading
+        Input:
+        user_id                : str — target user UUID
+        days_offline           : int — total consecutive offline days (≥ 15)
+        last_reading_date_str  : str — last known reading date as YYYYMMDD
+
+        Output:
+        Notification with type='feature_disabled' and dedup key
+        #offline_since_{last_reading_date_str}.
+        Sent once per offline cycle when days_offline reaches 15.
         """
         content = (
             f"Solar Forecast has been paused. "
@@ -204,7 +212,11 @@ class Notification:
             timestamp=datetime.now(timezone.utc),
             supabase=None,
         )
-
+    # =========================================================
+    # END OF SOLAR FORECAST
+    # =========================================================
+    
+    
     # =========================================================
     # Push title / body (used by FCM for all notification types)
     # =========================================================

@@ -1,9 +1,9 @@
 // ══════════════════════════════════════════════════════════════════
 //  solar_forecast.dart
 //
-//  Solar Forecast screen — displays the forecast state for the user's
-//  solar system. State is determined by the backend and returned as a
-//  `case` string. This file handles all UI rendering per case.
+//  Solar Forecast screen — renders the forecast state for the user's
+//  solar system. State is determined by the backend and returned as
+//  a `case` string. This file handles all UI rendering per case.
 //
 //  Cases:
 //    no_panels          — user has no production device
@@ -24,19 +24,19 @@ import 'package:lumin_application/Screens/devices/device_management_page.dart';
 
 
 // ═══════════════════════════════════════════════════════════
-//  GHI BASELINE DATA
-//  Source: NREL PVWatts / Saudi meteorological stations
-//  Used to compute the α (personalized performance factor)
-//  and to project future season production in forecast_available.
-//  Formula: E (kWh) = GHI × PR × P_nom × days  (IEC 61724-1)
+//  GHI CONSTANTS
+//  GHI values come from backend (XGBoost JSON, site-specific).
+//  XGBoost covers all Saudi Arabia via 6 climate clusters +
+//  Haversine nearest-site mapping → site_ghi is always populated
+//  when user has coordinates (which is always the case).
+//  PR = 0.78 per:
+//    - Jeddah residential PV study: PR = 78% measured
+//      (MDPI Sustainability 2019, doi:10.3390/su12010262)
+//    - Saudi distributed PV range: 77–84.27%
+//      (ScienceDirect Energy Strategy Reviews 2024,
+//       doi:10.1016/j.esr.2024.101468)
+//  Formula: E = (GHI/1000) × PR × P_nom × days  (IEC 61724-1)
 // ═══════════════════════════════════════════════════════════
-
-// Monthly average GHI (kWh/m²/day) — Saudi national average
-const _kGhi = <int, double>{
-  1: 4.14, 2: 5.01, 3: 6.02, 4: 6.71,  5: 7.14,
-  6: 7.27, 7: 6.98, 8: 6.75, 9: 6.21, 10: 5.44,
-  11: 4.52, 12: 3.89,
-};
 
 // Days per month (non-leap year)
 const _kDays = <int, int>{
@@ -45,21 +45,28 @@ const _kDays = <int, int>{
   11: 30, 12: 31,
 };
 
-// Performance Ratio per IEC 61724-1
+// Performance Ratio = 0.78 — validated for Saudi residential PV
+// (see sources above). Within documented range 77–84.27% for Saudi Arabia.
 const _kPR = 0.78;
 
-/// Expected production for a given month and panel capacity.
-double _eExpected(int month, double panelCapacity) {
-  final ghi  = _kGhi[month]  ?? 6.0;
+/// E_expected(month) = (GHI_daily / 1000) × PR × P_nom × days
+/// Formula: IEC 61724-1 / NREL PVWatts (Dobos 2014, doi:10.2172/1158421)
+/// GHI from siteGhi is already in kWh/m²/day (backend divides by 1000).
+/// If site_ghi missing (should never occur — XGBoost covers all Saudi Arabia),
+/// defaults to 6.0 kWh/m²/day as neutral value.
+double _eExpected(int month, double panelCapacity, Map<int, double> siteGhi) {
+  final ghi  = siteGhi[month] ?? 6.0;
   final days = _kDays[month] ?? 30;
   return ghi * _kPR * panelCapacity * days;
 }
 
-/// Expected production with a 0.5%/year growth factor applied.
+/// E_expected_future with +0.5%/year growth factor applied to GHI.
 /// yearDelta = forecastYear - baseYear
-double _eExpectedFuture(int month, double panelCapacity, int yearDelta) {
-  final ghi  = (_kGhi[month] ?? 6.0) * (1 + 0.005 * yearDelta);
-  final days = _kDays[month] ?? 30;
+/// Formula: baseGhi × (1 + 0.005 × yearDelta) × PR × P_nom × days
+double _eExpectedFuture(int month, double panelCapacity, int yearDelta, Map<int, double> siteGhi) {
+  final baseGhi = siteGhi[month] ?? 6.0;
+  final ghi     = baseGhi * (1 + 0.005 * yearDelta);
+  final days    = _kDays[month] ?? 30;
   return ghi * _kPR * panelCapacity * days;
 }
 
@@ -123,7 +130,6 @@ class _SolarForecastPageState extends State<SolarForecastPage> {
               : _buildCase(),
     ));
 
-  /// Route to the correct case widget based on the backend response.
   Widget _buildCase() {
     switch (_data['case'] as String? ?? 'no_panels') {
       case 'no_panels':           return _NoPanelsCase(data: _data);
@@ -135,7 +141,6 @@ class _SolarForecastPageState extends State<SolarForecastPage> {
     }
   }
 
-  /// Handle the reconnect flow from the feature_disabled screen.
   Future<void> _handleCheckDevice() async {
     setState(() => _loading = true);
     try {
@@ -198,7 +203,6 @@ class _ErrorState extends StatelessWidget {
 
 // ═══════════════════════════════════════════════════════════
 //  CASE: no_panels
-//  User has no production device — show regional GHI estimate.
 // ═══════════════════════════════════════════════════════════
 
 class _NoPanelsCase extends StatelessWidget {
@@ -208,9 +212,11 @@ class _NoPanelsCase extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final city       = data['city'] as String? ?? '';
-    final avgGhi     = (data['avg_daily_ghi'] as num? ?? 0.0).toDouble();
-    final avgMonthly = (data['avg_monthly_production'] as num? ?? 0.0).toDouble();
+    final city            = data['city'] as String? ?? '';
+    final expectedRaw     = data['expected_this_month'];
+    final expectedThisMonth = expectedRaw != null
+        ? '~${(expectedRaw as num).toStringAsFixed(0)} kWh'
+        : null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
@@ -238,25 +244,21 @@ class _NoPanelsCase extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: AppColors.sub, height: 1.5)))),
         const SizedBox(height: 24),
-        GlassCard(radius: 18, padding: const EdgeInsets.all(16), child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              _IconBox(icon: Icons.wb_sunny_rounded, color: _yellow),
-              const SizedBox(width: 10),
-              const Text('Solar Potential — Your Region',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _yellow)),
-            ]),
-            const SizedBox(height: 14),
-            _Row2(label: 'Avg daily solar radiation',
-              value: '${avgGhi.toStringAsFixed(1)} kWh/m\u00b2/day'),
-            const SizedBox(height: 8),
-            _Row2(label: 'Est. monthly production (5 kWp)',
-              value: '~${avgMonthly.toStringAsFixed(0)} kWh/mo'),
-            const SizedBox(height: 12),
-            const _NoteBox(icon: Icons.info_outline_rounded, color: _yellow,
-              text: 'Estimates use a standard 5 kWp system with a Performance Ratio of 0.78. '
-                    'Actual production varies by system size, panel type, and local conditions.'),
-          ])),
+        if (expectedThisMonth != null)
+          GlassCard(radius: 18, padding: const EdgeInsets.all(16), child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                _IconBox(icon: Icons.wb_sunny_rounded, color: _yellow),
+                const SizedBox(width: 10),
+                const Text('Solar Potential — Your Region',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _yellow)),
+              ]),
+              const SizedBox(height: 14),
+              _Row2(
+                label: 'Est. production this month',
+                value: expectedThisMonth,
+              ),
+            ])),
         const SizedBox(height: 12),
         const _Disclaimer(noPanels: true),
       ]));
@@ -266,8 +268,6 @@ class _NoPanelsCase extends StatelessWidget {
 
 // ═══════════════════════════════════════════════════════════
 //  CASE: collecting
-//  Device installed at the start of a season.
-//  Collecting data normally through the current season.
 // ═══════════════════════════════════════════════════════════
 
 class _CollectingCase extends StatelessWidget {
@@ -336,9 +336,6 @@ class _CollectingCase extends StatelessWidget {
 
 // ═══════════════════════════════════════════════════════════
 //  CASE: collecting_extended
-//  Device installed near the end of a season.
-//  Collection extends into the next season to reach the
-//  45-day minimum threshold for a reliable forecast.
 // ═══════════════════════════════════════════════════════════
 
 class _CollectingExtendedCase extends StatelessWidget {
@@ -346,7 +343,6 @@ class _CollectingExtendedCase extends StatelessWidget {
   final VoidCallback onRefresh;
   const _CollectingExtendedCase({required this.data, required this.onRefresh});
 
-  /// Build an ordered list of month abbreviations from startIso to endIso.
   List<String> _monthRange(String startIso, String endIso) {
     const names = ['', 'Jan','Feb','Mar','Apr','May','Jun',
                    'Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -430,7 +426,6 @@ class _CollectingExtendedCase extends StatelessWidget {
                 elapsedWeeks: elapsedWeeks,
                 seasonStart: displayStart,
                 customLabels: monthLabels.isNotEmpty ? monthLabels : null,
-                // directProgress corrects the dot position for partial months
                 directProgress: (displayStart.isNotEmpty && nextSeasonEnd.isNotEmpty)
                     ? _toMonthProgress(displayStart, nextSeasonEnd, daysElapsed)
                     : null,
@@ -453,14 +448,14 @@ class _CollectingExtendedCase extends StatelessWidget {
 
 // ═══════════════════════════════════════════════════════════
 //  CASE: forecast_available
-//  Previous season data is complete (≥ 45 days collected).
-//  Personalized forecast is computed and displayed.
 //
 //  α (alpha) — personalized performance factor:
-//    α = sumActual / sumExpected
-//    Computed here in Flutter to keep the backend stateless.
-//    α is never stored — it is recalculated on each page open.
-//    Forecast = α × GHI_future × PR × P_nom × days
+//    α = Σ E_actual / Σ E_expected
+//    E_expected uses site_ghi from XGBoost JSON (location-specific).
+//    If site_ghi missing (should never occur — XGBoost covers all Saudi Arabia),
+//    defaults to 6.0 kWh/m²/day as neutral value inside _eExpected.
+//    α is never stored — recalculated on each page open.
+//    E_personalized = E_expected_future × α
 // ═══════════════════════════════════════════════════════════
 
 class _ForecastAvailableCase extends StatefulWidget {
@@ -477,7 +472,7 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
   late List<double> _predicted;
   late List<String> _monthLabels;
   late int _baseYear;
-  late List<int> _forecastYears;
+  late Map<int, double> _siteGhi;
 
   @override
   void initState() { super.initState(); _compute(); }
@@ -489,6 +484,17 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
     final panelCap   = (data['panel_capacity']   as num? ?? 5.0).toDouble();
     final rawActual  = data['actual_by_month']   as Map<String, dynamic>? ?? {};
 
+    // ── Parse site_ghi from backend (XGBoost location-specific GHI) ──
+    // Keys are month numbers as strings ("1"–"12"), values in kWh/m²/day.
+    // Filter out any invalid keys (defensive — should never occur since
+    // XGBoost covers all Saudi Arabia via 6 clusters + Haversine mapping).
+    final rawSiteGhi = data['site_ghi'] as Map<String, dynamic>? ?? {};
+    _siteGhi = Map.fromEntries(
+      rawSiteGhi.entries
+          .map((e) => MapEntry(int.tryParse(e.key) ?? 0, (e.value as num).toDouble()))
+          .where((entry) => entry.key >= 1 && entry.key <= 12),
+    );
+
     final sortedKeys = rawActual.keys.toList()..sort();
     _actual = sortedKeys.map((k) => (rawActual[k] as num).toDouble()).toList();
     _monthLabels = sortedKeys.map((k) {
@@ -497,30 +503,28 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
     }).toList();
 
     final months = _seasonMonthNums(prevSeason);
-    final sumExp = months.map((m) => _eExpected(m, panelCap)).fold(0.0, (a, b) => a + b);
+
+    // ── α = Σ actual / Σ expected ───────────
+    // E_expected uses site_ghi (XGBoost per-location) — more accurate
+    // than national average. α captures actual system efficiency:
+    // losses from panel angle, shading, wiring, soiling.
+    final sumExp = months
+        .map((m) => _eExpected(m, panelCap, _siteGhi))
+        .fold(0.0, (a, b) => a + b);
     final sumAct = _actual.fold(0.0, (a, b) => a + b);
 
-    // α = actual / expected — personalizes the GHI-based projection
-    _alpha        = sumExp > 0 ? sumAct / sumExp : 1.0;
-    _baseYear     = prevStart.isNotEmpty ? int.parse(prevStart.split('-')[0]) : DateTime.now().year;
-    _forecastYears = [_baseYear + 1, _baseYear + 2];
-    _forecastYear  = _forecastYears.first;
-    _predicted     = _buildForecast(_forecastYear, months, panelCap);
+    _alpha       = sumExp > 0 ? sumAct / sumExp : 1.0;
+    _baseYear    = prevStart.isNotEmpty ? int.parse(prevStart.split('-')[0]) : DateTime.now().year;
+    _forecastYear = _baseYear + 1;
+    _predicted    = _buildForecast(_forecastYear, months, panelCap);
   }
 
   List<double> _buildForecast(int year, List<int> months, double panelCap) {
     final yearDelta = year - _baseYear;
-    return months.map((m) => _eExpectedFuture(m, panelCap, yearDelta) * _alpha).toList();
-  }
-
-  void _onYearChanged(int year) {
-    final data       = widget.data;
-    final prevSeason = data['prev_season'] as String;
-    final panelCap   = (data['panel_capacity'] as num? ?? 5.0).toDouble();
-    setState(() {
-      _forecastYear = year;
-      _predicted    = _buildForecast(year, _seasonMonthNums(prevSeason), panelCap);
-    });
+    // E_personalized = E_expected_future × α 
+    return months
+        .map((m) => _eExpectedFuture(m, panelCap, yearDelta, _siteGhi) * _alpha)
+        .toList();
   }
 
   @override
@@ -564,15 +568,14 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
             const Spacer(),
             _InfoBtn(title: 'Your Personalized Forecast',
               body: 'This forecast is built from your actual ${_cap(prevSeason)} production data.\n\n'
-                    'We calculate your system\'s real-world performance factor, '
-                    'then apply it to future GHI solar radiation projections to '
-                    'predict your production for the same season next year.\n\n'
+                    'We calculate your system\'s real-world performance factor (α), '
+                    'then apply it to future GHI solar radiation projections — '
+                    'sourced from our XGBoost model trained on 41 Saudi stations — '
+                    'to predict your production for the same season next year.\n\n'
                     'The dashed line shows your actual ${_cap(prevSeason)} output. '
                     'The solid line shows the predicted output for the selected year.\n\n'
-                    'Methodology: IEC TS 61724-3 / NREL PVWatts (Dobos, 2014).'),
+                    ),
           ]),
-          const SizedBox(height: 14),
-          _YearSel(years: _forecastYears, selected: _forecastYear, onChanged: _onYearChanged),
           const SizedBox(height: 14),
           if (_actual.isNotEmpty && _predicted.isNotEmpty)
             _SeasonChartCard(
@@ -619,17 +622,19 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
               ]))),
           ]),
           const SizedBox(height: 12),
-          // Investment recommendation threshold: 10% IRR (above S&P 500 average)
+         // Production growth proxy — 10% signals positive trend.
+        // Full IRR requires cost data not available in this scope.
           _TileCard(
             icon: pct >= 10 ? Icons.lightbulb_rounded : Icons.info_outline_rounded,
             color: pct >= 10 ? AppColors.cyan : const Color(0xFFFF9C3B),
             title: pct >= 10 ? 'Investment Recommended' : 'Hold Your Investment',
             body: pct >= 10
-                ? 'Solar forecasts for your system look promising. Expanding your '
-                  'installation — adding panels or upgrading battery storage — is '
-                  'expected to yield returns above the 10% threshold.'
-                : 'Based on your system\'s forecast, a major expansion is not '
-                  'recommended at this time. Monitor trends before investing further.',
+                ? 'Your solar system shows a positive production growth signal '
+                  'vs last season. For investment decisions, consult a solar '
+                  'specialist with full cost and tariff data.'
+                : 'Production is expected to remain stable vs last season. '
+                  'Monitor trends over the next season before making expansion decisions.',
+ 
           ),
           const SizedBox(height: 12),
           if (daysOffline > 0) ...[
@@ -642,7 +647,7 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
                 icon: Icons.data_thresholding_outlined,
                 color: AppColors.cyan,
                 title: 'Now Collecting — ${_cap(season)} $emoji',
-                subtitle: 'Next forecast: ${_cap(season)} ${_baseYear + 1} & ${_baseYear + 2}'),
+                subtitle: 'Next forecast: ${_cap(season)} $_forecastYear'),
               const SizedBox(height: 14),
               _SeasonTimeline(totalWeeks: totalWeeks, elapsedWeeks: elapsedWeeks,
                 seasonStart: data['season_start'] as String? ?? '',
@@ -659,7 +664,6 @@ class _ForecastAvailableCaseState extends State<_ForecastAvailableCase> {
 
 // ═══════════════════════════════════════════════════════════
 //  CASE: feature_disabled
-//  Device offline ≥ 15 days — forecast paused.
 // ═══════════════════════════════════════════════════════════
 
 class _FeatureDisabled extends StatelessWidget {
@@ -741,8 +745,6 @@ class _FeatureDisabled extends StatelessWidget {
 
 // ═══════════════════════════════════════════════════════════
 //  SHARED WIDGET: _StatsRow
-//  Displays collected / missed / remaining day counts.
-//  Used by: collecting, collecting_extended, forecast_available.
 // ═══════════════════════════════════════════════════════════
 
 class _StatsRow extends StatelessWidget {
@@ -920,7 +922,7 @@ class _TimelinePainter extends CustomPainter {
 
 
 // ═══════════════════════════════════════════════════════════
-//  SEASON CHART CARD (forecast_available only)
+//  SEASON CHART CARD
 // ═══════════════════════════════════════════════════════════
 
 class _SeasonChartCard extends StatelessWidget {
@@ -1030,39 +1032,6 @@ class _ChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _ChartPainter o) =>
     o.actual!=actual || o.predicted!=predicted;
 }
-
-
-// ═══════════════════════════════════════════════════════════
-//  YEAR SELECTOR
-// ═══════════════════════════════════════════════════════════
-
-class _YearSel extends StatelessWidget {
-  final List<int> years; final int selected; final ValueChanged<int> onChanged;
-  const _YearSel({required this.years, required this.selected, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(4),
-    decoration: BoxDecoration(color: AppColors.card2,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: AppColors.stroke)),
-    child: Row(children: years.map((y) {
-      final active = y==selected;
-      return Expanded(child: GestureDetector(
-        onTap: ()=>onChanged(y),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds:200), curve:Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(vertical:9),
-          decoration: BoxDecoration(
-            color: active?AppColors.mint.withOpacity(0.16):Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color:active?AppColors.mint.withOpacity(0.35):Colors.transparent)),
-          child: Center(child: Text('$y', style: TextStyle(
-            fontSize:13, fontWeight:FontWeight.w800,
-            color:active?AppColors.mint:AppColors.sub))))));
-    }).toList()));
-}
-
 
 // ═══════════════════════════════════════════════════════════
 //  LEGEND ITEM
@@ -1280,10 +1249,11 @@ class _Disclaimer extends StatelessWidget {
       const SizedBox(width:8),
       Expanded(child:Text(
         noPanels
-            ? 'These are estimated figures based on GHI solar radiation data for your region '
-              'and a standard 5 kWp reference system.'
-            : 'Forecasts are based on your production data and GHI solar radiation models. '
-              'Actual output may vary due to weather, panel condition, and system changes.',
+            ? 'This is an estimated figure based on ideal solar conditions for your region, '
+              'using XGBoost irradiance predictions. Actual production depends on your system size and setup.'
+            : 'Forecasts are based on your production data and XGBoost GHI predictions '
+              'for your location. Actual output may vary due to weather, panel condition, '
+              'and system changes.',
         style:const TextStyle(fontSize:11, color:AppColors.sub, height:1.4))),
     ]));
 }
@@ -1293,9 +1263,6 @@ class _Disclaimer extends StatelessWidget {
 //  HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════
 
-/// Convert linear day progress into a month-accurate timeline position.
-/// Fixes the partial-month dot placement in collecting_extended
-/// (e.g. Nov 20–30 = 10 days, not a full month segment).
 double _toMonthProgress(
   String displayStartIso,
   String endDateIso,
@@ -1335,10 +1302,8 @@ double _toMonthProgress(
   }
 }
 
-/// Capitalize the first letter of a string.
 String _cap(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
 
-/// Format an ISO date string as "Jan 1, 2026".
 String _fmtDate(String iso) {
   const months = ['Jan','Feb','Mar','Apr','May','Jun',
                    'Jul','Aug','Sep','Oct','Nov','Dec'];

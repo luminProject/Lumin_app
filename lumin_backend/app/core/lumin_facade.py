@@ -32,7 +32,6 @@ class LuminFacade:
     - viewDevices
     - getMyCurrentBill
     - viewEnergyEnergyCalculation
-    - getSolarPrediction
     - viewRecommendations
     - getNotifications
     """
@@ -753,12 +752,6 @@ class LuminFacade:
             "skipped_users": skipped_users,"errors": errors,
         }
    
-   
-   
-   
-   
-   
-   
     # -----------------------------
     # BILL CYCLE TOTAL ENERGY RESET
     # -----------------------------
@@ -778,44 +771,58 @@ class LuminFacade:
             "data": res.data or [],
         }
 
-    # ═══════════════════════════════════════════════════════════════
-    # SOLAR FORECAST (Sprint 2)
-    # ---------------------------------------------------------------
-    # Delegates entirely to SolarForecastService which implements the
-    # 5-case state machine. See Change Log v4, Section 3.14.
+   # ═══════════════════════════════════════════════════════════════
+    # SOLAR FORECAST — Solar Forecast Feature
     #
-    # Cases returned by SolarForecastService.get_forecast_state():
-    #   no_panels          — user has no production device registered
-    #   collecting         — collecting data in current season
-    #   collecting_extended — installed near end of season, extends to next
-    #   forecast_available — previous season complete (≥ 45 days)
-    #   feature_disabled   — device offline ≥ 15 days
-    #
-    # Design notes:
-    #   - No direct Supabase access here — all DB goes through
-    #     SolarForecastService → DatabaseManager.
-    #   - WeatherData class removed (Change Log v4, Section 3.2).
-    #   - has_solar_panels flag removed — state derived at runtime
-    #     from device table and energycalculation (CL v4, Section 3.9).
-    #   - α (performance factor) computed in Flutter only, never here
-    #     (Change Log v4, Section 3.17).
+    # Pattern: Facade → SolarForecast → DatabaseManager
+    # SolarForecast is instantiated with supabase_admin to bypass RLS
+    # for notification writes (device_warning, feature_disabled, forecast_ready).
+    # α (performance factor) is computed client-side in Flutter — never stored here.
     # ═══════════════════════════════════════════════════════════════
-
-    def get_solar_prediction(self, user_id: str) -> Dict[str, Any]:
+    def getSolarPrediction(
+        self,
+        user_id: str,
+        test_date: str = None,
+    ) -> Dict[str, Any]:
         """
-        Solar Forecast state machine — delegates to SolarForecastService.
+        Entry point for the Solar Forecast feature.
 
-        Returns a dict with `case` key and case-specific fields.
-        The Flutter UI uses `case` to decide which screen to render.
+        Input:
+        user_id   : str — target user UUID
+        test_date : str — optional YYYY-MM-DD override for today (used in tests)
+
+        Output:
+        dict — one of 5 cases:
+            no_panels | collecting | collecting_extended |
+            forecast_available | feature_disabled
+        See SolarForecast.get_forecast_state() for full payload structure.
+
+        Processing:
+        1. Instantiates SolarForecast with supabase_admin (bypasses RLS)
+        2. Runs check_user() for device status and notification dispatch
+            — failure is caught and logged, never blocks the forecast response
+        3. Calls get_forecast_state() and returns its result
         """
-        from app.models.solar_forecast_service import SolarForecastService
-        service = SolarForecastService(self.supabase)
-        return service.get_forecast_state(user_id)
+        from app.models.solar_forecast import SolarForecast
+        from app.supabase_client import supabase_admin
 
-    # ═══════════════════════════════════════════════════════════════
-    # END SOLAR FORECAST — Sprint 2
-    # ═══════════════════════════════════════════════════════════════
+        solar = SolarForecast(supabase_admin)
 
+        # Device check runs first — failure is isolated and non-fatal.
+        # The forecast response is always returned regardless of device state.
+        try:
+            solar.check_user(user_id, test_date=test_date)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[LuminFacade] device check non-fatal: {e}"
+            )
+
+        return solar.get_forecast_state(user_id, test_date=test_date)
+    # ═══════════════════════════════════════════════════════════════
+    # END OF SOLAR FORECAST
+    # ═══════════════════════════════════════════════════════════════
+    
     def view_recommendations(self, user_id: str) -> List[Dict[str, Any]]:
         res = (
             self.supabase
@@ -837,6 +844,7 @@ class LuminFacade:
             .execute()
         )
         return res.data or []
+
 
     # -----------------------------
     # SMART RECOMMENDATIONS & NOTIFICATIONS (Mana's feature)
@@ -1135,8 +1143,4 @@ class LuminFacade:
     def resetDailyEnergy(self) -> None:
         """Reset total_energy_daily for all devices. Called at midnight."""
         self.db.reset_all_daily_energy()
-
-
-class ProfileValidationError(Exception):
-    """Raised when profile input is invalid"""
-    pass
+ 

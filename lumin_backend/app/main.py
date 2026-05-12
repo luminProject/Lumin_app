@@ -31,11 +31,9 @@ from app.supabase_client import extract_bearer, get_supabase_for_jwt, supabase_a
 from app.routers import router as profile_router
 from app.routers.recommendation_router import router as recommendation_router
 from app.core.lumin_facade import LuminFacade
-from app.scheduler import create_scheduler
+from app.core.solarforecast_scheduler import create_scheduler
 import supabase as supabase_
-from app.models.solar_forecast_service import SolarForecastService
 from app.models.energy_calculation import EnergyCalculation
-from app.tasks.device_monitor import DeviceMonitor
 from app.core.lumin_facade import LuminFacade, BillingDateRequiredError
 from app.models.bill_prediction import BillValidationError
 logging.basicConfig(level=logging.INFO)
@@ -73,9 +71,6 @@ supabase = supabase_.create_client(SUPABASE_URL, SUPABASE_KEY)
 facade = LuminFacade(supabase)
 # Admin facade for system jobs/schedulers
 admin_facade   = LuminFacade(supabase_admin)
-# Solar Forecast feature instances
-solar_service  = SolarForecastService(supabase)
-device_monitor = DeviceMonitor(supabase)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -431,27 +426,59 @@ def run_bill_checkpoint():
         raise HTTPException(status_code=500, detail=str(e))    
 
 
-# -----------------------------
-# Solar Forecast Endpoint
-# -----------------------------
+# ═══════════════════════════════════════════════════════════════
+# SOLAR FORECAST — Solar Forecast Feature
+#
+# GET  /solar-forecast/{user_id}
+#   Runs per-user device check then returns the current forecast case.
+#   test_date param (YYYY-MM-DD) overrides today — used in integration tests.
+#   ValueError from invalid test_date → 422. Unexpected errors → 500.
+#
+# POST /solar-forecast/{user_id}/check-device
+#   Re-evaluates forecast state after user taps "Check Device Connection".
+#   Returns reconnected=True if case is no longer feature_disabled.
+#
+# Delegates to: LuminFacade.getSolarPrediction() → SolarForecast
+# ═══════════════════════════════════════════════════════════════
 @app.get("/solar-forecast/{user_id}")
 async def solar_forecast(user_id: str, test_date: str = None):
+    """
+    Returns the current Solar Forecast state for the user.
+
+    Input:
+      user_id   : str — user UUID (path param)
+      test_date : str — optional YYYY-MM-DD override for today (query param)
+
+    Output:
+      {"status": "success", "data": {case, ...}}
+      ValueError  → HTTP 422 (invalid test_date format)
+      Exception   → HTTP 500 (DB or unexpected error)
+    """
     try:
-        # نشغل الـ monitor بشكل معزول — لو فشل ما يوقف الفوركاست
-        try:
-            device_monitor.check_user(user_id, test_date=test_date)
-        except Exception as monitor_err:
-            logger.warning(f"device_monitor error (non-fatal): {monitor_err}")
-        
-        state = solar_service.get_forecast_state(user_id, test_date=test_date)
+        state = facade.getSolarPrediction(user_id, test_date=test_date)
         return {"status": "success", "data": state}
+    except ValueError as e:
+        # Invalid test_date format → 422 Unprocessable Entity
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
+        # DB unreachable or unexpected error → 500
+        logger.error(f"solar_forecast endpoint error for {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/solar-forecast/{user_id}/check-device")
 def check_device_connection(user_id: str):
+    """
+    Re-checks device connection status for the Solar Forecast feature.
+
+    Input:
+      user_id : str — user UUID (path param)
+
+    Output:
+      {"status": "success", "data": {case, ...}, "reconnected": bool}
+      reconnected=True if the case returned is not feature_disabled.
+    """
     try:
-        state = solar_service.get_forecast_state(user_id)
+        state = facade.getSolarPrediction(user_id)
         return {
             "status": "success",
             "data": state,
@@ -459,30 +486,13 @@ def check_device_connection(user_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+# ═══════════════════════════════════════════════════════════════
+# END OF SOLAR FORECAST
+# ═══════════════════════════════════════════════════════════════
 
-# DEV ONLY — احذفي قبل production
-@app.post("/dev/trigger-monitor/{user_id}")
-def dev_trigger_monitor(user_id: str, test_date: str = None):
-    import io
-    log_stream = io.StringIO()
-    handler = logging.StreamHandler(log_stream)
-    logging.getLogger("device_monitor").addHandler(handler)
-    try:
-        device_monitor.check_user(user_id, test_date=test_date)
-        solar_service.get_forecast_state(user_id, test_date=test_date)
-        notifs = (
-            supabase.table("notification")
-            .select("notification_type, content, timestamp")
-            .eq("user_id", user_id)
-            .order("timestamp", desc=True)
-            .limit(5)
-            .execute()
-        ).data
-        return {"status": "ok", "notifications_sent": notifs, "log": log_stream.getvalue()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        logging.getLogger("device_monitor").removeHandler(handler)
+
+
+
 # -----------------------------
 # Recommendations Endpoint
 # -----------------------------
@@ -494,7 +504,7 @@ def get_recommendations(user_id: str):
     try:
         return {
             "status": "success",
-            "data": facade.view_recommendations(user_id)
+            "data": facade.viewRecommendations(user_id, recommendation_type="auto")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -545,6 +555,3 @@ def get_realtime_data(user_id: str):
         return facade.getRealtimeData(user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    stats

@@ -513,6 +513,7 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
+
   /// Wraps a field in a minimum-height container for consistent layout.
   Widget _field(Widget child) => ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 50),
@@ -646,3 +647,4 @@ class _PasswordRules extends StatelessWidget {
       ],
     );
   }
+  } 

@@ -1,22 +1,27 @@
 """
-scheduler.py
+solarforecast_scheduler.py
 
-Runs automatic recommendation jobs based on user type:
+Manages all scheduled background jobs for the Lumin backend.
 
-For Solar users (Grid + Solar):
-  - Saturday 3:00 PM Saudi time → Solar (custom) recommendation
-  - Tuesday 7:00 PM Saudi time → General recommendation
+Job schedule:
+  Solar users  (Grid + Solar):
+    Saturday  3:00 PM Saudi → custom solar recommendation
+    Tuesday   7:00 PM Saudi → general recommendation
 
-For Grid-only users:
-  - Monday 4:00 PM Saudi time → General recommendation
-  - Thursday 8:00 PM Saudi time → General recommendation
+  Grid-only users:
+    Monday    4:00 PM Saudi → general recommendation
+    Thursday  8:00 PM Saudi → general recommendation
 
-Also runs Solar Forecast jobs daily (Sprint 2 — Solar Forecast feature):
-  - 8:00 AM Saudi time (05:00 UTC) → Device Monitor
-  - 8:05 AM Saudi time (05:05 UTC) → Solar Forecast Check
+  Daily jobs:
+    8:00 AM Saudi (05:00 UTC) → Device Monitor (all production devices)
+    8:05 AM Saudi (05:05 UTC) → Solar Forecast state check (all users)
+    12:00 AM Saudi (21:00 UTC prev day) → Reset total_energy_daily
+
+  Every minute:
+    → UPSERT energycalculation (one row per user per day)
 
 Saudi time = UTC+3
-APScheduler day_of_week values: mon, tue, wed, thu, fri, sat, sun
+APScheduler day_of_week: mon, tue, wed, thu, fri, sat, sun
 """
 
 from __future__ import annotations
@@ -28,42 +33,50 @@ from apscheduler.triggers.cron import CronTrigger
 from app.supabase_client import supabase_admin
 from app.core.lumin_facade import LuminFacade
 from app.models.recommendation import Recommendation
-from app.tasks.device_monitor import DeviceMonitor
-from app.models.solar_forecast_service import SolarForecastService  # Sprint 2
+from app.models.solar_forecast import SolarForecast
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Device Monitor Job ──────────────────────────────────────
-# Sprint 2 — Solar Forecast feature.
 # Runs daily to check all production devices for missing data.
 # Sends device_warning or feature_disabled via DatabaseManager + FCMService.
-# See Change Log v4, Section 3.12.
 
 async def run_device_monitor():
-    """8:00 AM Saudi → check all production devices for missing data."""
+    """
+    Daily job — checks all production devices for missing data.
+    Scheduled: 8:00 AM Saudi (05:00 UTC).
+
+    Calls SolarForecast.run_device_check() directly with supabase_admin.
+    Does not go through LuminFacade — this is a background batch task
+    with no HTTP request context.
+    Sends device_warning or feature_disabled notifications as needed.
+    """
     logger.info("Scheduler: Starting daily device monitor job...")
     try:
-        monitor = DeviceMonitor(supabase_admin)
-        monitor.run()
+        solar_svc = SolarForecast(supabase_admin)
+        solar_svc.run_device_check()
         logger.info("Scheduler: Device monitor job complete.")
     except Exception as e:
         logger.error(f"Scheduler: Device monitor job failed — {e}")
 
 
 # ─── Solar Forecast Check Job ────────────────────────────────
-# Sprint 2 — Solar Forecast feature.
 # Runs daily to evaluate forecast state for all users.
 # Sends forecast_ready notification if previous season is complete (≥ 45 days).
-# Cases: no_panels | collecting | collecting_extended |
-#        forecast_available | feature_disabled
-# See Change Log v4, Section 3.14.
 
 async def run_solar_forecast_check():
-    """8:05 AM Saudi → check forecast state for all users."""
+    """
+    Daily job — evaluates forecast state for every user with a production device.
+    Scheduled: 8:05 AM Saudi (05:05 UTC).
+
+    Iterates all user IDs and calls SolarForecast.get_forecast_state() for each.
+    Triggers forecast_ready notification if the previous season is complete (≥ 45 days).
+    Errors for individual users are caught and logged without stopping the batch.
+    """
     logger.info("Scheduler: Starting solar forecast check job...")
     try:
-        solar_svc = SolarForecastService(supabase_admin)
+        solar_svc = SolarForecast(supabase_admin)
         response  = supabase_admin.table("users").select("user_id").execute()
 
         for user in (response.data or []):
@@ -83,6 +96,21 @@ async def run_solar_forecast_check():
 # ─── Helpers ─────────────────────────────────────────────────
 
 async def _send_to_users(user_filter: str, recommendation_type: str):
+    """
+    Sends a recommendation to all users matching the given filter.
+
+    Input:
+      user_filter        : str — "solar" | "grid_only"
+      recommendation_type: str — "solar" | "general"
+
+    Output: none
+
+    Processing:
+      Fetches all users from DB, filters by solar ownership,
+      then calls LuminFacade.viewRecommendations() for each eligible user.
+      Skips users who have already hit the daily recommendation limit.
+      Logs success, skip, and error counts on completion.
+    """
     logger.info(
         f"Scheduler: Starting job — filter='{user_filter}', type='{recommendation_type}'"
     )
@@ -224,7 +252,7 @@ def create_scheduler() -> AsyncIOScheduler:
     """
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    # 8:00 AM Saudi = 05:00 UTC → Device Monitor (Sprint 2)
+    # 8:00 AM Saudi = 05:00 UTC → Device Monitor
     scheduler.add_job(
         run_device_monitor,
         trigger=CronTrigger(hour=5, minute=0),
@@ -233,7 +261,7 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 8:05 AM Saudi = 05:05 UTC → Solar Forecast Check (Sprint 2)
+    # 8:05 AM Saudi = 05:05 UTC → Solar Forecast Check
     scheduler.add_job(
         run_solar_forecast_check,
         trigger=CronTrigger(hour=5, minute=5),

@@ -71,7 +71,17 @@ class StatsService:
     # ─────────────────────────────────────────
 
     def _get_week(self, user_id: str, anchor: str) -> dict:
-        """7 daily points: Sat(0) → Fri(6)."""
+        """
+        Builds 7 daily data points for the week containing the anchor date.
+
+        Input:
+        user_id : str — target user UUID
+        anchor  : str — any date within the target week, format YYYY-MM-DD
+
+        Output:
+        {"range": "week", "points": [{x, solar, grid, label}, ...]}
+        Week runs Sat(x=0) → Fri(x=6). Missing days return 0.0 for both fields.
+        """
         anchor_date = date.fromisoformat(anchor)
 
         # Python weekday: Mon=0 … Sat=5, Sun=6
@@ -98,11 +108,16 @@ class StatsService:
 
     def _get_month(self, user_id: str, anchor: str) -> dict:
         """
-        4 weekly buckets within a month.
-          W1 = days  1 –  7
-          W2 = days  8 – 14
-          W3 = days 15 – 21
-          W4 = days 22 – end
+        Builds 4 weekly bucket totals for the given month.
+
+        Input:
+        user_id : str — target user UUID
+        anchor  : str — target month, format YYYY-MM
+
+        Output:
+        {"range": "month", "points": [{x, solar, grid, label}, ...]}
+        Buckets: W1=days 1–7, W2=8–14, W3=15–21, W4=22–end.
+        Missing days contribute 0.0.
         """
         parts      = anchor.split("-")
         year, mon  = int(parts[0]), int(parts[1])
@@ -131,7 +146,17 @@ class StatsService:
         return {"range": "month", "points": points}
 
     def _get_year(self, user_id: str, anchor: str) -> dict:
-        """12 monthly totals: Jan(0) → Dec(11)."""
+        """
+        Builds 12 monthly totals for the given year.
+
+        Input:
+        user_id : str — target user UUID
+        anchor  : str — target year, format YYYY
+
+        Output:
+        {"range": "year", "points": [{x, solar, grid, label}, ...]}
+        Jan(x=0) → Dec(x=11). Missing months return 0.0.
+        """
         year   = int(anchor)
         start  = date(year, 1,  1)
         end    = date(year, 12, 31)

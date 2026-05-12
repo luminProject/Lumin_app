@@ -21,7 +21,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   String? _error;
   List<_NotifItem> _allNotifications = [];
 
-  // ── Solar Forecast tab state (Sprint 2 — added by solar forecast team) ──
+  // ── Solar Forecast tab state ──
   // Solar notifications are fetched directly from Supabase using inFilter
   // on notification_type, bypassing the general notifications API endpoint.
   // This is intentional: solar notifications are written by DeviceMonitor
@@ -33,8 +33,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   @override
   void initState() {
     super.initState();
-    _loadNotifications();
-    _loadSolarNotifications(); // Sprint 2: load solar tab on init
+    _loadNotifications(); 
   }
 
   // ── general notifications (recommendations + bill) from API ──
@@ -58,17 +57,27 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
-  // ══════════════════════════════════════════════════════════
-  // SOLAR FORECAST NOTIFICATIONS (Sprint 2)
-  // Fetches directly from Supabase using inFilter on 3 types:
-  //   - forecast_ready   : personalized forecast is available
-  //   - device_warning   : device missed a daily reading
-  //   - feature_disabled : device offline ≥ 15 days
-  //
-  // Dedup keys (#season_name_year, #warn_YYYYMMDD, #offline_since_YYYYMMDD)
-  // are stripped from content before display using replaceAll(RegExp).
-  // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+// SOLAR FORECAST — Solar Forecast Notifications Tab
+//
+// Fetches solar-specific notifications directly from Supabase
+// using inFilter on 3 notification types:
+//   forecast_ready   — personalized forecast is ready for a past season
+//   device_warning   — device missed a daily reading (days 1–14)
+//   feature_disabled — device offline ≥ 15 days, forecast paused
+//
+// Bypasses the general notifications API endpoint because solar
+// notifications are written by the backend SolarForecast class
+// (not routed through the recommendations router).
+//
+// Dedup key suffixes (#spring_2026, #warn_20260501, #offline_since_...)
+// are stripped before display using replaceAll(RegExp(r'\s*#\w[\w-]*$')).
+// ══════════════════════════════════════════════════════════
   Future<void> _loadSolarNotifications() async {
+    /// Fetches solar forecast notifications for the current user directly from
+    /// Supabase. Filters on types: forecast_ready, device_warning, feature_disabled.
+    /// Strips dedup key suffixes from content before rendering.
+    /// Populates [_solarNotifications] and sets [_solarLoading].
     setState(() => _solarLoading = true);
     try {
       final client = Supabase.instance.client;
@@ -149,7 +158,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
   // ══════════════════════════════════════════════════════════
-  // END SOLAR FORECAST NOTIFICATIONS
+  // END OF SOLAR FORECAST
   // ══════════════════════════════════════════════════════════
 
   _NotifItem _mapToNotifItem(Map<String, dynamic> n) {
@@ -209,11 +218,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return _allNotifications
           .where((n) => n.type == 'bill_warning' || n.type == 'bill_update')
           .toList();
-    if (_tab == 2) return _solarNotifications; // Sprint 2: solar tab
+    if (_tab == 2) return _solarNotifications; 
     return _allNotifications.where((n) => n.type == 'recommendation').toList();
   }
 
-  // Sprint 2: solar tab uses its own loading state
+ 
   bool get _isLoading => _tab == 2 ? _solarLoading : _loading;
 
   String get _emptyText {
@@ -230,7 +239,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   void _refresh() {
     if (_tab == 2) {
-      _loadSolarNotifications(); // Sprint 2: manual refresh for solar tab
+      _loadSolarNotifications(); 
     } else {
       _loadNotifications();
     }
@@ -316,12 +325,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     selected: _tab == 1,
                     onTap: () => setState(() => _tab = 1),
                   ),
-                  // Sprint 2: Solar Forecast tab
+                  
                   const SizedBox(width: 8),
+                  // FIX: load solar notifications on first tap if not yet loaded
                   _FilterChip(
                     text: 'Solar forecast',
                     selected: _tab == 2,
-                    onTap: () => setState(() => _tab = 2),
+                    onTap: () {
+                      setState(() => _tab = 2);
+                      if (_solarNotifications.isEmpty) _loadSolarNotifications();
+                    },
                   ),
                 ],
               ),

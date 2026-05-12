@@ -25,8 +25,7 @@ db = supabase_.create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"
 
 USER_ID    = "7f5f8815-f3f4-49f2-927b-31fb2dce6396"
 BASE_URL   = "http://127.0.0.1:8000"
-STATE_FILE = "test_state.json"
-
+STATE_FILE = os.path.join(os.path.dirname(__file__), "test_state.json")
 
 # ═══════════════════════════════════════════════
 #  STATE
@@ -103,7 +102,10 @@ def cmd_collect(user_id: str, days: int):
         })
 
     for i in range(0, len(rows), 20):
-        db.table("energycalculation").upsert(rows[i:i + 20]).execute()
+        db.table("energycalculation").upsert(
+            rows[i:i + 20], 
+            on_conflict="user_id,date"
+        ).execute()
 
     new_date = current + timedelta(days=days)
 
@@ -236,12 +238,12 @@ def cmd_date():
 
 HELP = """
 استخدامي:
-  python test_tool.py collect <days>    أضف N يوم بيانات (يحرك التاريخ للأمام)
-  python test_tool.py offline <days>    N يوم بدون بيانات (يحرك التاريخ للأمام)
-  python test_tool.py reconnect         حدّث last_reading_at في التاريخ الحالي
-  python test_tool.py reset             ريست كامل + اختار تاريخ بداية
-  python test_tool.py status            اعرض JSON من API بالتاريخ الحالي
-  python test_tool.py date              اعرض التاريخ الافتراضي الحالي
+  python db_seeder.py collect <days>    أضف N يوم بيانات (يحرك التاريخ للأمام)
+  python db_seeder.py offline <days>    N يوم بدون بيانات (يحرك التاريخ للأمام)
+  python db_seeder.py reconnect         حدّث last_reading_at في التاريخ الحالي
+  python db_seeder.py reset             ريست كامل + اختار تاريخ بداية
+  python db_seeder.py status            اعرض JSON من API بالتاريخ الحالي
+  python db_seeder.py date              اعرض التاريخ الافتراضي الحالي
 """
 
 if __name__ == "__main__":

@@ -289,7 +289,7 @@ class ApiService {
     }
   }
 
-  // ===== Solar Forecast (Sprint 2 — Solar Forecast feature) =====
+  
 
   /// GET /solar-forecast/{userId}
   /// Returns the current forecast state for the user's solar system.
@@ -297,7 +297,7 @@ class ApiService {
   ///                      forecast_available | feature_disabled
   Future<Map<String, dynamic>> getSolarForecast() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/solar-forecast/$_userId'),
+      Uri.parse('$baseUrl/solar-forecast/$_userId?test_date=2026-06-08'),
       headers: authHeaders(),
     );
     if (response.statusCode == 200) {
@@ -307,7 +307,7 @@ class ApiService {
     }
   }
 
-  /// POST /solar-forecast/{userId}/check-device
+  
   /// Called from feature_disabled screen to check if device reconnected.
   /// Returns: { reconnected: bool }
   Future<Map<String, dynamic>> checkSolarDevice() async {

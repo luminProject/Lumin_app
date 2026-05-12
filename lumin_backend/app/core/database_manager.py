@@ -378,7 +378,7 @@ class DatabaseManager:
             )
             data = response.data or []
             return data[0].get("fcm_token") if data else None
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             return None
 
     # =========================================================
@@ -487,7 +487,7 @@ class DatabaseManager:
                 .execute()
             )
             return len(response.data or [])
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             return 0
 
     def count_week_solar_recommendations(self, user_id: str) -> int:
@@ -502,7 +502,7 @@ class DatabaseManager:
                 .execute()
             )
             return len(response.data or [])
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             return 0
 
     def get_random_general_recommendation_text(self) -> Optional[str]:
@@ -626,7 +626,7 @@ class DatabaseManager:
             response = self.supabase.table("device").select("user_id").execute()
             rows = response.data or []
             return list(set(str(r["user_id"]) for r in rows if r.get("user_id")))
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             return []
 
     def get_user_daily_energy_totals(self, user_id: str) -> Dict[str, float]:
@@ -657,7 +657,7 @@ class DatabaseManager:
                 "total_consumption": round(total_consumption, 6),
                 "solar_production": round(solar_production, 6),
             }
-        except Exception:
+        except (AttributeError, TypeError, KeyError, ValueError):
             return {"total_consumption": 0.0, "solar_production": 0.0}
 
     def upsert_energy_calculation(
@@ -713,13 +713,13 @@ class DatabaseManager:
                 # INSERT new row
                 self.supabase.table("energycalculation").insert(payload).execute()
 
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError, ValueError) as e:
             logging.getLogger(__name__).error(
                 f"upsert_energy_calculation failed for {user_id}: {e}"
             )
 
     # ═══════════════════════════════════════════════════════════════
-    # SOLAR FORECAST — Sprint 2
+    # SOLAR FORECAST
     # ---------------------------------------------------------------
     # days_offline logic updated:
     #   1. Check energycalculation for today's solar_production
@@ -731,7 +731,7 @@ class DatabaseManager:
     def get_user_location(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Return location, latitude, longitude for a user.
-        Used by SolarForecastService to determine city and GHI region.
+        Used by SolarForecast to determine city and GHI region.
         """
         rows = (
             self.supabase.table("users")
@@ -761,7 +761,7 @@ class DatabaseManager:
     def get_all_production_devices(self) -> List[Dict[str, Any]]:
         """
         Return all production devices across all users.
-        Used by DeviceMonitor.run() for the daily check.
+        Used by SolarForecast.run_device_check() for the daily check.
         Returns distinct user_ids with their devices.
         """
         return (
@@ -774,7 +774,12 @@ class DatabaseManager:
     def get_production_devices_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Return all production devices for a specific user.
-        Used by DeviceMonitor.check_user().
+        Reserved for future multi-device logic — not currently called by DeviceMonitor.
+        DeviceMonitor uses get_production_device() (singular, first device only).
+        Future work: use this when multi-panel household support is added.
+        
+        Reserved for future multi-device logic — not currently called.
+        DeviceMonitor merged into SolarForecast (CL v6 §3.15).
         """
         return (
             self.supabase.table("device")
@@ -820,7 +825,7 @@ class DatabaseManager:
         Return today's solar_production from energycalculation.
         Returns 0.0 if no row exists for today.
 
-        Used as the first check in DeviceMonitor:
+       Used by SolarForecast.run_device_check() for the daily check.
           if solar_production == 0.0 today → possible device issue
           → proceed to check last_reading_at
         """
@@ -845,7 +850,7 @@ class DatabaseManager:
         """
         Return energycalculation rows with solar_production > 0
         within a date range (inclusive).
-        Used by SolarForecastService to count collected days.
+        Used by SolarForecast to count collected days.
         """
         return (
             self.supabase.table("energycalculation")
@@ -879,10 +884,7 @@ class DatabaseManager:
                 .execute()
             )
             return len(res.data or []) > 0
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             return False
 
 
-# ═══════════════════════════════════════════════════════════════
-# END SOLAR FORECAST — Sprint 2
-# ═══════════════════════════════════════════════════════════════

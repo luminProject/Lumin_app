@@ -1,25 +1,32 @@
 """
-tests/test_solar_forecast.py
-============================
-Unit tests for SolarForecastService — season helpers and state machine.
+tests/test_unit_solarforecast.py
 
-WHY UNIT TESTS:
-  These tests verify pure logic functions and case routing WITHOUT
-  connecting to Supabase or any external service. This means:
-  - Tests run instantly (no network latency)
-  - Tests are deterministic (no dependency on real data)
-  - Each test isolates exactly one behaviour
+Unit Tests — Solar Forecast Feature
+=====================================
+Verifies pure logic functions and case routing in solar_forecast.py
+WITHOUT connecting to Supabase, the XGBoost JSON file, or any
+external service. DatabaseManager is replaced with MagicMock throughout.
+
+Test classes:
+  TestGetCurrentSeason   — month → season mapping (SEASON_MAP)
+  TestGetSeasonBounds    — season start/end date calculation
+  TestSeasonRotation     — get_previous_season() / get_next_season()
+  TestSeasonRefYear      — winter ref_year boundary (Bug#1 regression)
+  TestConstants          — MIN_COLLECTION_DAYS, FEATURE_DISABLE_DAYS, SEASON_MONTHS
+  TestCaseRouting        — 5-case state machine (get_forecast_state)
+  TestDeviceCheck        — device_warning / feature_disabled notification routing
 
 HOW TO RUN:
   cd lumin_backend
-  python -m pytest tests/test_solar_forecast.py -v
+  python -m pytest tests/test_unit_solarforecast.py -v
 """
 
 import pytest
 from datetime import date
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from app.models.solar_forecast_service import (
+from app.models.solar_forecast import (
+    SolarForecast,
     get_current_season,
     get_season_bounds,
     get_previous_season,
@@ -32,18 +39,32 @@ from app.models.solar_forecast_service import (
 
 
 # ══════════════════════════════════════════════════════════════════
+#  SHARED HELPER — used by TestCaseRouting and TestDeviceCheck
+#  Single source of truth: if SolarForecast.__init__ changes,
+#  only one method needs updating.
+# ══════════════════════════════════════════════════════════════════
+
+def _make_solar_service():
+    """
+    Builds a SolarForecast instance with a mocked DatabaseManager.
+
+    Used by both TestCaseRouting and TestDeviceCheck.
+    Single source of truth — if SolarForecast.__init__ changes,
+    only this function needs updating.
+    """
+    svc = SolarForecast(MagicMock())
+    svc.db = MagicMock()
+    return svc
+
+
+# ══════════════════════════════════════════════════════════════════
 #  TEST CLASS 1: get_current_season()
 #
-#  WHAT WE TEST:
-#    The month → season mapping based on Saudi Ministry of Environment
-#    classification (mewa.gov.sa). Every month must map to exactly
-#    one season — no month should be missing or double-mapped.
+#  Tests the month → season mapping (SEASON_MAP constant).
+#  Every month must map to exactly one season — no gaps or duplicates.
 #
-#  WHY THIS MATTERS:
-#    If a month maps to the wrong season, the system will query the
-#    wrong date range for collected data, causing wrong case routing.
-#    Example: March mapped to winter instead of spring would cause
-#    the system to look for winter data when it should look at spring.
+#  Impact of failure: wrong season → wrong date range queried →
+#  wrong collected_days count → wrong case returned to Flutter.
 # ══════════════════════════════════════════════════════════════════
 
 class TestGetCurrentSeason:
@@ -98,15 +119,13 @@ class TestGetCurrentSeason:
 # ══════════════════════════════════════════════════════════════════
 #  TEST CLASS 2: get_season_bounds()
 #
-#  WHAT WE TEST:
-#    The start and end dates for each season given a reference year.
-#    Winter is the critical case because it spans two calendar years:
-#    Winter 2027 = December 2026 → February 2027.
+#  Tests start/end date calculation for each season.
+#  Winter is the critical case — it spans two calendar years:
+#    Winter 2027 = December 2026 → February 2027
 #
-#  WHY THIS MATTERS:
-#    get_season_bounds() is used to query energycalculation rows.
-#    Wrong bounds = wrong number of collected days = wrong case routing.
-#    The 45-day threshold depends entirely on correct date ranges.
+#  Impact of failure: wrong bounds → wrong energycalculation rows
+#  fetched → wrong collected_days count → wrong case routing.
+#  The 45-day threshold depends entirely on correct date ranges.
 # ══════════════════════════════════════════════════════════════════
 
 class TestGetSeasonBounds:
@@ -142,8 +161,7 @@ class TestGetSeasonBounds:
 
     def test_season_is_approximately_90_days(self):
         # Each season is ~90 days. This is the scientific basis for the
-        # 45-day MIN_COLLECTION_DAYS threshold (80/20 split on 90 days).
-        # See Change Log v4, Section 3.11.
+        # 45-day MIN_COLLECTION_DAYS threshold (50% of a 90-day season).
         for season in ["spring", "summer", "autumn"]:
             start, end = get_season_bounds(season, 2026)
             days = (end - start).days + 1
@@ -159,16 +177,14 @@ class TestGetSeasonBounds:
 
 
 # ══════════════════════════════════════════════════════════════════
-#  TEST CLASS 3: get_previous_season() and get_next_season()
+#  TEST CLASS 3: get_previous_season() / get_next_season()
 #
-#  WHAT WE TEST:
-#    The circular rotation of seasons. The order is:
-#    winter → spring → summer → autumn → winter (wraps around)
+#  Tests the circular season rotation:
+#    winter → spring → summer → autumn → winter (wraps)
 #
-#  WHY THIS MATTERS:
-#    get_previous_season() is used to find what season to check for
-#    completed data (to determine forecast_available).
-#    Wrong rotation = checking the wrong season's data.
+#  Impact of failure: wrong previous season → wrong season's data
+#  checked for ≥ 45 days → forecast_available triggered incorrectly
+#  or missed entirely.
 # ══════════════════════════════════════════════════════════════════
 
 class TestSeasonRotation:
@@ -206,17 +222,13 @@ class TestSeasonRotation:
 # ══════════════════════════════════════════════════════════════════
 #  TEST CLASS 4: season_ref_year()
 #
-#  WHAT WE TEST:
-#    The reference year calculation. Winter in December must use
-#    next year as ref_year because December belongs to NEXT year's
-#    winter (Dec 2026 is part of Winter 2027).
+#  Tests the reference year logic. Winter in December must use
+#  next year as ref_year — December 2026 is part of Winter 2027.
 #
-#  WHY THIS MATTERS:
-#    This was the root cause of Bug#1 in the original implementation.
-#    Using the wrong ref_year for winter caused the system to look up
-#    season bounds one year too early, returning zero collected rows,
-#    and therefore showing "collecting" instead of "forecast_available".
-#    See Change Log v4, Section 3.10.
+#  Bug#1 regression: the original implementation used the current year
+#  for December, causing season bounds to be queried one year too early.
+#  Result was zero collected rows → "collecting" shown instead of
+#  "forecast_available". These tests lock that fix in place.
 # ══════════════════════════════════════════════════════════════════
 
 class TestSeasonRefYear:
@@ -258,33 +270,28 @@ class TestSeasonRefYear:
 # ══════════════════════════════════════════════════════════════════
 #  TEST CLASS 5: Constants
 #
-#  WHAT WE TEST:
-#    The scientific threshold constants and the season-month mapping.
+#  Guards against accidental changes to threshold constants and
+#  the season-month mapping.
 #
-#  WHY THIS MATTERS:
-#    MIN_COLLECTION_DAYS = 45 is the 80/20 split on a 90-day season.
-#    FEATURE_DISABLE_DAYS = 15 must match device_monitor.py exactly.
-#    If either constant changes without updating the Change Log, it
-#    breaks the scientific justification documented in CL v4 §3.11.
-#    This test acts as a "guardrail" against accidental changes.
+#  MIN_COLLECTION_DAYS = 45  — 50% of a ~90-day season (IEC 61724-1)
+#  FEATURE_DISABLE_DAYS = 15 — must match solar_forecast.py
+#  SEASON_MONTHS             — all 12 months, each in exactly one season
 # ══════════════════════════════════════════════════════════════════
 
 class TestConstants:
 
     def test_min_collection_days_is_45(self):
-        # 45 = 50% of ~90-day season (80/20 split basis)
-        # Changing this requires updating Change Log v4 Section 3.11
+        "MIN_COLLECTION_DAYS changed! This value requires scientific "
+        "justification — 45 = 50% of a ~90-day season (IEC 61724-1)."
         assert MIN_COLLECTION_DAYS == 45, (
-            "MIN_COLLECTION_DAYS changed! Update Change Log v4 §3.11 "
-            "with scientific justification before changing this value."
+            
         )
 
     def test_feature_disable_days_is_15(self):
-        # Must match FEATURE_DISABLE_DAYS in device_monitor.py
-        # Both files use this constant — they must stay in sync
+        "FEATURE_DISABLE_DAYS changed! Must stay consistent with "
+        "solar_forecast.py FEATURE_DISABLE_DAYS constant."
         assert FEATURE_DISABLE_DAYS == 15, (
-            "FEATURE_DISABLE_DAYS changed! Ensure device_monitor.py "
-            "uses the same value."
+            
         )
 
     def test_all_12_months_covered_exactly_once(self):
@@ -306,45 +313,34 @@ class TestConstants:
 
 
 # ══════════════════════════════════════════════════════════════════
-#  TEST CLASS 6: Case Routing (mocked Supabase)
+#  TEST CLASS 6: Case Routing
 #
-#  WHAT WE TEST:
-#    The SolarForecastService.get_forecast_state() case routing logic.
-#    Supabase is replaced with MagicMock — no real DB connection needed.
+#  Tests get_forecast_state() case routing with a mocked DatabaseManager.
+#  No real DB, Supabase, or XGBoost JSON file is needed.
 #
-#  WHY THIS MATTERS:
-#    The 5 forecast cases (no_panels, collecting, collecting_extended,
-#    forecast_available, feature_disabled) must route correctly based
-#    on the data returned. Wrong routing = wrong UI shown to the user.
+#  Cases covered:
+#    no_panels, feature_disabled, collecting,
+#    collecting_extended, forecast_available
+#  Boundary values tested:
+#    days_offline 14 vs 15 (FEATURE_DISABLE_DAYS threshold)
+#    collected_days 44 vs 45 (MIN_COLLECTION_DAYS threshold)
 #
-#  HOW MOCKING WORKS:
-#    MagicMock replaces supabase.table().select().eq()...execute()
-#    with a fake object that returns our test data. This lets us test
-#    case routing without needing a real database.
+#  _get_ghi_for_location and _get_site_ghi are patched where needed
+#  to avoid dependency on the XGBoost JSON file.
 # ══════════════════════════════════════════════════════════════════
-
 class TestCaseRouting:
     """
-    Tests the 5-case state machine in get_forecast_state().
-    self.db (DatabaseManager) is replaced with MagicMock so no
-    real DB or supabase connection is needed.
+    Tests the 5-case state machine in SolarForecast.get_forecast_state().
 
-    New days_offline logic (updated):
-      1. get_today_solar_production() checked first
-      2. If 0 → get_latest_production_reading() used for days_offline
-      is_on is NOT used — wiring issues can cause is_on=True + zero production.
+    days_offline computation under test:
+      Step 1 — get_today_solar_production(): if > 0 → days_offline = 0
+      Step 2 — if 0 → get_latest_production_reading() to compute days_offline
+      is_on is intentionally NOT used (wiring issues can give is_on=True + zero production).
     """
 
     def _make_service_with_db(self):
-        """
-        Create SolarForecastService with a fully mocked DatabaseManager.
-        Patch self.db directly — cleaner than mocking raw supabase chains.
-        """
-        from app.models.solar_forecast_service import SolarForecastService
-        mock_supabase = MagicMock()
-        service       = SolarForecastService(mock_supabase)
-        service.db    = MagicMock()
-        return service
+        """Delegates to module-level _make_solar_service() to avoid duplication."""
+        return _make_solar_service()
 
     def test_no_panels_case_when_no_production_device(self):
         """
@@ -358,22 +354,25 @@ class TestCaseRouting:
         service.db.get_user_location.return_value = {
             "location": "Jeddah", "latitude": 21.49, "longitude": 39.19
         }
-        # No production device → no_panels
         service.db.get_production_device.return_value = None
 
-        result = service.get_forecast_state("test-user", test_date="2026-06-15")
+        # _get_ghi_for_location calls _solar_model which requires the JSON file.
+        # Mock it directly to isolate unit test from file system dependency.
+        with patch.object(service, "_get_ghi_for_location",
+                          return_value={"expected_this_month": 320.5}):
+            result = service.get_forecast_state("test-user", test_date="2026-06-15")
 
         assert result["case"] == "no_panels"
-        assert "avg_daily_ghi" in result
+        
+        assert "expected_this_month" in result
 
     def test_feature_disabled_when_offline_15_or_more_days(self):
         """
         SCENARIO: No solar production today. Last reading was 15 days ago.
         EXPECTED: case = 'feature_disabled', days_offline >= 15
-        WHY: After FEATURE_DISABLE_DAYS (15) days with no reading,
-             the forecast is paused to protect users from stale data.
-             days_offline is based on last_reading_at, not is_on,
-             because wiring issues can cause is_on=True + zero production.
+
+        Boundary value: FEATURE_DISABLE_DAYS = 15.
+        Testing exactly at the threshold (15 days) confirms the >= condition.
         """
         service = self._make_service_with_db()
 
@@ -395,6 +394,40 @@ class TestCaseRouting:
         assert result["case"] == "feature_disabled", \
             f"Expected 'feature_disabled', got '{result['case']}'"
         assert result["days_offline"] >= FEATURE_DISABLE_DAYS
+
+    def test_feature_enabled_when_offline_14_days(self):
+        """
+        BOUNDARY VALUE: 14 days offline must NOT trigger feature_disabled.
+        FEATURE_DISABLE_DAYS = 15, so 14 days should still allow normal case.
+        This tests the boundary from below (one day before the threshold).
+        """
+        service = self._make_service_with_db()
+
+        service.db.get_user_location.return_value = {
+            "location": "Riyadh", "latitude": 24.71, "longitude": 46.68
+        }
+        service.db.get_production_device.return_value = {
+            "device_id": 1, "panel_capacity": 5.0,
+            "installation_date": "2026-01-01",
+        }
+        service.db.get_today_solar_production.return_value = 0.0
+        # 14 days offline: May 4 - Apr 20 = 14 days
+        service.db.get_latest_production_reading.return_value = \
+            "2026-04-20T12:00:00+00:00"
+
+        # Current season (spring) 4 rows, prev season (winter) 0 rows
+        service.db.get_season_energy_rows.side_effect = [
+            [{"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 10.0}
+             for i in range(1, 5)],
+            [],
+        ]
+        service.db.check_notification_exists.return_value = False
+
+        result = service.get_forecast_state("test-user", test_date="2026-05-04")
+
+        assert result["case"] != "feature_disabled", \
+            "14 days offline should NOT trigger feature_disabled (threshold is 15)"
+        assert result["days_offline"] == 14
 
     def test_collecting_case_when_device_installed_start_of_season(self):
         """
@@ -434,6 +467,51 @@ class TestCaseRouting:
             f"Expected 'collecting', got '{result['case']}'"
         assert result["collected_days"] == 19
 
+    def test_forecast_available_requires_exactly_45_days(self):
+        """
+        BOUNDARY VALUE: MIN_COLLECTION_DAYS = 45.
+        44 days → NOT forecast_available.
+        45 days → forecast_available.
+        Tests both sides of the threshold.
+        """
+        service = self._make_service_with_db()
+
+        service.db.get_user_location.return_value = {
+            "location": "Jeddah", "latitude": 21.49, "longitude": 39.19
+        }
+        service.db.get_production_device.return_value = {
+            "device_id": 3, "panel_capacity": 5.0,
+            "installation_date": "2026-01-15",
+        }
+        service.db.get_today_solar_production.return_value = 15.0
+
+        # 44 rows — one below threshold
+        ec_current = [{"date": f"2026-06-{str(i).zfill(2)}", "solar_production": 15.0}
+                      for i in range(1, 6)]
+        ec_prev_44 = [{"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 15.0}
+                      for i in range(1, 45)]  # 44 rows
+
+        service.db.get_season_energy_rows.side_effect = [ec_current, ec_prev_44]
+        service.db.check_notification_exists.return_value = False
+
+        result_44 = service.get_forecast_state("test-user", test_date="2026-06-15")
+        assert result_44["case"] != "forecast_available", \
+            "44 days should NOT trigger forecast_available (threshold is 45)"
+
+        # Reset and test with 45 rows — exactly at threshold
+        service.db.get_user_fcm_token.return_value = None
+        service.db.insert_notification.return_value = {}
+        ec_prev_45 = [{"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 15.0}
+                      for i in range(1, 46)]  # 45 rows
+
+        service.db.get_season_energy_rows.side_effect = [ec_current, ec_prev_45]
+
+        with patch.object(service, "_get_site_ghi", return_value={m: 6.0 for m in range(1, 13)}):
+            result_45 = service.get_forecast_state("test-user", test_date="2026-06-15")
+
+        assert result_45["case"] == "forecast_available", \
+            "45 days should trigger forecast_available"
+
     def test_forecast_available_when_previous_season_complete(self):
         """
         SCENARIO: Today June 15 (summer). Previous season = spring.
@@ -450,34 +528,177 @@ class TestCaseRouting:
         }
         service.db.get_production_device.return_value = {
             "device_id": 3, "panel_capacity": 5.0,
-            "installation_date": "2026-01-15",  # installed in winter
+            "installation_date": "2026-01-15",
         }
-        # Production > 0 today → days_offline = 0
         service.db.get_today_solar_production.return_value = 15.0
 
-        # Current season (summer): 15 rows; Previous season (spring): 50 rows
         ec_current = [
             {"date": f"2026-06-{str(i).zfill(2)}", "solar_production": 15.0}
             for i in range(1, 16)
         ]
-        ec_prev = [
-            {"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 15.0}
-            for i in range(1, 46)
-        ] + [
-            {"date": f"2026-04-{str(i).zfill(2)}", "solar_production": 15.0}
-            for i in range(1, 6)
-        ]
-        service.db.get_season_energy_rows.side_effect = [
-            ec_current,  # first call = current season
-            ec_prev,     # second call = previous season (50 rows ≥ 45)
-        ]
+        ec_prev = (
+            [{"date": f"2026-03-{str(i).zfill(2)}", "solar_production": 15.0}
+             for i in range(1, 46)] +
+            [{"date": f"2026-04-{str(i).zfill(2)}", "solar_production": 15.0}
+             for i in range(1, 6)]
+        )  # 50 rows total
+        service.db.get_season_energy_rows.side_effect = [ec_current, ec_prev]
         service.db.check_notification_exists.return_value = False
         service.db.insert_notification.return_value = {}
         service.db.get_user_fcm_token.return_value = None
 
-        result = service.get_forecast_state("test-user", test_date="2026-06-15")
+        with patch.object(service, "_get_site_ghi", return_value={m: 6.0 for m in range(1, 13)}):
+            result = service.get_forecast_state("test-user", test_date="2026-06-15")
 
         assert result["case"] == "forecast_available", \
             f"Expected 'forecast_available', got '{result['case']}'"
         assert result["prev_season"] == "spring"
         assert "actual_by_month" in result
+
+    def test_collecting_extended_case(self):
+        """
+        SCENARIO: Device installed Feb 15 (near end of winter).
+                  Remaining winter days from install = 13 days < MIN_COLLECTION_DAYS.
+        EXPECTED: case = 'collecting_extended', next_season = 'spring'
+        WHY: Not enough days left in the install season to collect 45 days,
+             so collection extends into the next season.
+        """
+        service = self._make_service_with_db()
+
+        service.db.get_user_location.return_value = {
+            "location": "Jeddah", "latitude": 21.49, "longitude": 39.19
+        }
+        service.db.get_production_device.return_value = {
+            "device_id": 4, "panel_capacity": 5.0,
+            "installation_date": "2026-02-15",  # near end of winter
+        }
+        service.db.get_today_solar_production.return_value = 12.0
+
+        ec_current = [
+            {"date": f"2026-02-{str(i).zfill(2)}", "solar_production": 12.0}
+            for i in range(15, 22)  # 7 rows
+        ]
+        service.db.get_season_energy_rows.side_effect = [
+            ec_current,  # current season (winter)
+            [],          # previous season (autumn) — no data
+        ]
+        service.db.check_notification_exists.return_value = False
+
+        result = service.get_forecast_state("test-user", test_date="2026-02-21")
+
+        assert result["case"] == "collecting_extended", \
+            f"Expected 'collecting_extended', got '{result['case']}'"
+        assert result["next_season"] == "spring"
+
+
+# ══════════════════════════════════════════════════════════════════
+#  TEST CLASS 7: Device Check Methods
+#
+#  Tests check_user() and run_device_check() notification routing.
+#  Device check logic lives in SolarForecast directly (not a separate class).
+#
+#  Notification types under test:
+#    device_warning   — days_offline 1–14
+#    feature_disabled — days_offline ≥ 15
+#  Also tests:
+#    dedup key prevents duplicate notifications
+#    run_device_check() iterates all users exactly once
+# ══════════════════════════════════════════════════════════════════
+
+class TestDeviceCheck:
+    """
+    Tests for SolarForecast device check methods.
+    self.db (DatabaseManager) is replaced with MagicMock — no real DB needed.
+    """
+
+    def _make_service(self):
+        """Delegates to module-level _make_solar_service() to avoid duplication."""
+        return _make_solar_service()
+
+    def test_check_user_no_action_when_production_today(self):
+        """
+        SCENARIO: Device produced energy today (production > 0).
+        EXPECTED: No notification sent — device is working fine.
+        WHY: Step 1 short-circuit — no need to check last_reading_at.
+        """
+        svc = self._make_service()
+        svc.db.get_today_solar_production.return_value = 12.5
+
+        svc.check_user("test-user", test_date="2026-06-15")
+
+        svc.db.insert_notification.assert_not_called()
+
+    def test_check_user_sends_device_warning_when_offline_1_to_14_days(self):
+        """
+        SCENARIO: No production today. Last reading was 5 days ago.
+        EXPECTED: device_warning notification sent (days 1–14).
+        BOUNDARY VALUE: 5 days is well within the 1–14 range.
+        """
+        svc = self._make_service()
+        svc.db.get_today_solar_production.return_value = 0.0
+        svc.db.get_latest_production_reading.return_value = "2026-06-10T12:00:00+00:00"
+        svc.db.get_production_device.return_value = {"installation_date": "2026-01-01"}
+        svc.db.check_notification_exists.return_value = False
+        svc.db.get_user_fcm_token.return_value = None
+        svc.db.insert_notification.return_value = {}
+
+        svc.check_user("test-user", test_date="2026-06-15")
+
+        svc.db.insert_notification.assert_called_once()
+        payload = svc.db.insert_notification.call_args[0][0]
+        assert payload["notification_type"] == "device_warning"
+
+    def test_check_user_sends_feature_disabled_at_15_days(self):
+        """
+        SCENARIO: No production. Last reading was exactly 15 days ago.
+        EXPECTED: feature_disabled notification sent (boundary = FEATURE_DISABLE_DAYS).
+        BOUNDARY VALUE: Tests at the exact threshold.
+        """
+        svc = self._make_service()
+        svc.db.get_today_solar_production.return_value = 0.0
+        svc.db.get_latest_production_reading.return_value = "2026-05-31T12:00:00+00:00"
+        svc.db.get_production_device.return_value = {"installation_date": "2026-01-01"}
+        svc.db.check_notification_exists.return_value = False
+        svc.db.get_user_fcm_token.return_value = None
+        svc.db.insert_notification.return_value = {}
+
+        svc.check_user("test-user", test_date="2026-06-15")
+
+        svc.db.insert_notification.assert_called_once()
+        payload = svc.db.insert_notification.call_args[0][0]
+        assert payload["notification_type"] == "feature_disabled"
+
+    def test_check_user_dedup_prevents_duplicate_notification(self):
+        """
+        SCENARIO: Device offline 5 days. Notification already sent today.
+        EXPECTED: No new notification inserted (dedup key exists).
+        WHY: Prevents duplicate notifications if endpoint is called multiple times.
+        """
+        svc = self._make_service()
+        svc.db.get_today_solar_production.return_value = 0.0
+        svc.db.get_latest_production_reading.return_value = "2026-06-10T12:00:00+00:00"
+        svc.db.get_production_device.return_value = {"installation_date": "2026-01-01"}
+        # Dedup key already exists
+        svc.db.check_notification_exists.return_value = True
+
+        svc.check_user("test-user", test_date="2026-06-15")
+
+        svc.db.insert_notification.assert_not_called()
+
+    def test_run_device_check_iterates_all_users(self):
+        """
+        SCENARIO: 3 users have production devices.
+        EXPECTED: _check_user_device called 3 times (once per user).
+        WHY: run_device_check() is the scheduler entry point for all users.
+        """
+        svc = self._make_service()
+        svc.db.get_all_production_devices.return_value = [
+            {"user_id": "user-1"},
+            {"user_id": "user-2"},
+            {"user_id": "user-3"},
+        ]
+        svc.db.get_today_solar_production.return_value = 15.0
+
+        svc.run_device_check()
+
+        assert svc.db.get_today_solar_production.call_count == 3
