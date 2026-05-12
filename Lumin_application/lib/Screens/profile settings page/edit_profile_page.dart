@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
@@ -34,6 +35,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   String _localPhoneDigits = '';
   String _initialCountryCode = 'SA';
   String _initialPhoneLocal = '';
+  bool _isPhoneValid = false;
 
   bool _loading = true;
   bool _saving = false;
@@ -42,6 +44,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   String? _phoneError;
   String? _solarPanelsError;
   String? _billingDateError;
+  String? _locationError;
 
   final _picker = ImagePicker();
   bool _uploadingAvatar = false;
@@ -176,14 +179,21 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final d = digits.trim();
 
     if (d.isEmpty) return 'Phone number is required';
-    if (!RegExp(r'^\d+$').hasMatch(d)) return 'Phone must contain numbers only';
+
+    if (!RegExp(r'^\d+$').hasMatch(d)) {
+      return 'Phone must contain numbers only';
+    }
+
+    if (!_isPhoneValid) {
+      return 'Please enter a valid phone number';
+    }
 
     final allSame = d.split('').every((c) => c == d[0]);
     if (allSame) return 'Phone number looks invalid';
 
-    if (RegExp(r'^123456').hasMatch(d)) return 'Phone number looks invalid';
-
-    if (d.length < 8 || d.length > 12) return 'Phone length is invalid';
+    if (RegExp(r'^123456').hasMatch(d)) {
+      return 'Phone number looks invalid';
+    }
 
     return null;
   }
@@ -204,7 +214,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _loadError = 'Unable to connect. Please check your connection and try again.';
+        _loadError =
+            'Unable to connect. Please check your connection and try again.';
       });
       return;
     }
@@ -241,11 +252,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
         _localPhoneDigits = '';
       }
 
+      _isPhoneValid = _localPhoneDigits.isNotEmpty;
+
       if (!mounted) return;
       setState(() {
         _phoneError = null;
         _solarPanelsError = null;
         _billingDateError = null;
+        _locationError = null;
         _loadError = null;
       });
     } catch (e) {
@@ -267,14 +281,27 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final phoneErr = _validatePhoneLocalDigits(_localPhoneDigits);
     final solarErr = _validateSolarPanels();
 
+    final billingErr = _lastBillingEndDate == null
+        ? 'Please select your latest bill end date'
+        : null;
+
+    final locationErr = (_latitude == null || _longitude == null)
+        ? 'Please select your home location'
+        : null;
+
     setState(() {
       _phoneError = phoneErr;
       _solarPanelsError = solarErr;
-      _billingDateError = null;
+      _billingDateError = billingErr;
+      _locationError = locationErr;
     });
 
-    if (!ok || phoneErr != null || solarErr != null) {
-      _toast('Fix the highlighted fields', success: false);
+    if (!ok ||
+        phoneErr != null ||
+        solarErr != null ||
+        billingErr != null ||
+        locationErr != null) {
+      _toast('Please complete required fields', success: false);
       return;
     }
 
@@ -302,7 +329,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       await _api.updateProfile(userId, model.toUpdateJson());
 
-      _toast('Saved');
+      _toast('Profile updated successfully');
       await _loadProfile();
     } catch (e) {
       debugPrint('PROFILE SAVE ERROR: $e');
@@ -343,34 +370,34 @@ class _EditProfilePageState extends State<EditProfilePage> {
     });
   }
 
-  Widget _billingInfoHint() {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Icon(
-              Icons.info_outline_rounded,
-              size: 16,
-              color: Colors.white.withOpacity(0.6),
-            ),
+Widget _billingInfoHint() {
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Icon(
+          Icons.info_outline_rounded,
+          size: 16,
+          color: Colors.white.withOpacity(0.6),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          'Choose the date labeled “End of Period” on your latest electricity bill. We use it to predict your upcoming bill. Do not choose the payment due date.',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.55),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            height: 1.3,
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'The end date of the billing period from your previous bill (not the payment due date).',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.55),
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                height: 1.3,
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-    
+        ),
+      ),
+    ],
+  );
+}
+  
   Widget _billingDateField() {
     final text = _lastBillingEndDate == null
         ? 'Select your latest bill end date'
@@ -559,6 +586,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       setState(() {
         _latitude = result.latitude;
         _longitude = result.longitude;
+        _locationError = null;
       });
 
       _toast('Location selected');
@@ -719,286 +747,315 @@ class _EditProfilePageState extends State<EditProfilePage> {
             : _loadError != null
                 ? _buildLoadErrorCard()
                 : Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    const SizedBox(height: 125),
-                    _avatarSection(),
-                    const SizedBox(height: 14),
-                    GlassCard(
-                      radius: 20,
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Full Name'),
-                          const SizedBox(height: 8),
-                          _nameField(),
-                          const SizedBox(height: 16),
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 125),
+                        _avatarSection(),
+                        const SizedBox(height: 14),
+                        GlassCard(
+                          radius: 20,
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _label('Full Name'),
+                              const SizedBox(height: 8),
+                              _nameField(),
+                              const SizedBox(height: 16),
 
-                          _label('Phone Number'),
-                          const SizedBox(height: 8),
-                          _phoneIntlField(),
-                          if (_phoneError != null) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              _phoneError!,
-                              style: const TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-
-                          const SizedBox(height: 16),
-                          _label('Energy Source'),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            initialValue: _energySource,
-                            dropdownColor: const Color(0xFF0F1713),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                            ),
-                            iconEnabledColor: Colors.white70,
-                            decoration: InputDecoration(
-                              isDense: true,
-                              enabledBorder: UnderlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: Colors.white.withOpacity(0.18),
-                                ),
-                              ),
-                              focusedBorder: const UnderlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: AppColors.mint,
-                                  width: 1.4,
-                                ),
-                              ),
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'Grid only',
-                                child: Text('Grid only'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'Grid + Solar',
-                                child: Text('Grid + Solar'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v == null) return;
-
-                              setState(() {
-                                _energySource = v;
-
-                                if (_energySource != 'Grid + Solar') {
-                                  _hasSolarPanels = null;
-                                  _solarPanelsError = null;
-                                } else {
-                                  _solarPanelsError = _validateSolarPanels();
-                                }
-                              });
-                            },
-                          ),
-
-                          if (_energySource == 'Grid + Solar') ...[
-                            const SizedBox(height: 16),
-                            _label('Solar Panels'),
-                            const SizedBox(height: 10),
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.06),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.10),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Do you have solar panels?',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _solarChoiceCard(
-                                          title: 'Yes',
-                                          value: true,
-                                          icon: Icons.solar_power_rounded,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: _solarChoiceCard(
-                                          title: 'No',
-                                          value: false,
-                                          icon: Icons.power_outlined,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  if (_solarPanelsError != null) ...[
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      _solarPanelsError!,
-                                      style: const TextStyle(
-                                        color: Colors.redAccent,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-
-                          const SizedBox(height: 18),
-                          _label('Billing Period End Date'),
-                          
-                          const SizedBox(height: 8),
-                          _billingInfoHint(),
-                          const SizedBox(height: 10),
-                          _billingDateField(),
-                          if (_billingDateError != null) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              _billingDateError!,
-                              style: const TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-
-                          const SizedBox(height: 18),
-                          _label('Home Location'),
-                          const SizedBox(height: 10),
-                          Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.10),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 42,
-                                      height: 42,
-                                      decoration: BoxDecoration(
-                                        color: AppColors.mint.withOpacity(0.16),
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: AppColors.mint.withOpacity(0.35),
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.my_location_rounded,
-                                        color: AppColors.mint,
-                                        size: 20,
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    SizedBox(
-                                      height: 46,
-                                      child: ElevatedButton(
-                                        onPressed: _pickOnMapInline,
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor:
-                                              const Color(0xFF3F8E6B),
-                                          foregroundColor: Colors.white,
-                                          elevation: 0,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 14,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(18),
-                                          ),
-                                        ),
-                                        child: const FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.map_rounded, size: 18),
-                                              SizedBox(width: 8),
-                                              Text(
-                                                'Pick on Map',
-                                                style: TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w900,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                _homeMapPreview(),
+                              _label('Phone Number'),
+                              const SizedBox(height: 8),
+                              _phoneIntlField(),
+                              if (_phoneError != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'Tap "Pick" to choose location on map.',
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.55),
-                                    fontWeight: FontWeight.w700,
+                                  _phoneError!,
+                                  style: const TextStyle(
+                                    color: Colors.redAccent,
                                     fontSize: 12,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
                               ],
-                            ),
-                          ),
 
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 50,
-                            child: ElevatedButton(
-                              onPressed: _saving ? null : _saveProfile,
-                              child: _saving
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
+                              const SizedBox(height: 16),
+                              _label('Energy Source'),
+                              const SizedBox(height: 8),
+                              DropdownButtonFormField<String>(
+                                initialValue: _energySource,
+                                dropdownColor: const Color(0xFF0F1713),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                                iconEnabledColor: Colors.white70,
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  enabledBorder: UnderlineInputBorder(
+                                    borderSide: BorderSide(
+                                      color: Colors.white.withOpacity(0.18),
+                                    ),
+                                  ),
+                                  focusedBorder: const UnderlineInputBorder(
+                                    borderSide: BorderSide(
+                                      color: AppColors.mint,
+                                      width: 1.4,
+                                    ),
+                                  ),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'Grid only',
+                                    child: Text('Grid only'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Grid + Solar',
+                                    child: Text('Grid + Solar'),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  if (v == null) return;
+
+                                  setState(() {
+                                    _energySource = v;
+
+                                    if (_energySource != 'Grid + Solar') {
+                                      _hasSolarPanels = null;
+                                      _solarPanelsError = null;
+                                    } else {
+                                      _solarPanelsError =
+                                          _validateSolarPanels();
+                                    }
+                                  });
+                                },
+                              ),
+
+                              if (_energySource == 'Grid + Solar') ...[
+                                const SizedBox(height: 16),
+                                _label('Solar Panels'),
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.06),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.10),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Do you have solar panels?',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                       ),
-                                    )
-                                  : const Text(
-                                      'Save Changes',
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: _solarChoiceCard(
+                                              title: 'Yes',
+                                              value: true,
+                                              icon: Icons.solar_power_rounded,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: _solarChoiceCard(
+                                              title: 'No',
+                                              value: false,
+                                              icon: Icons.power_outlined,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (_solarPanelsError != null) ...[
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          _solarPanelsError!,
+                                          style: const TextStyle(
+                                            color: Colors.redAccent,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+
+                              const SizedBox(height: 18),
+                              _label('Billing Period End Date'),
+                              const SizedBox(height: 8),
+                              _billingInfoHint(),
+                              const SizedBox(height: 10),
+                              _billingDateField(),
+                              if (_billingDateError != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  _billingDateError!,
+                                  style: const TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+
+                              const SizedBox(height: 18),
+                              _label('Home Location'),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Select your home location on the map.',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.45),
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.06),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: _locationError != null
+                                        ? Colors.redAccent.withOpacity(0.8)
+                                        : Colors.white.withOpacity(0.10),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 42,
+                                          height: 42,
+                                          decoration: BoxDecoration(
+                                            color:
+                                                AppColors.mint.withOpacity(0.16),
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            border: Border.all(
+                                              color: AppColors.mint
+                                                  .withOpacity(0.35),
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.my_location_rounded,
+                                            color: AppColors.mint,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        SizedBox(
+                                          height: 46,
+                                          child: ElevatedButton(
+                                            onPressed: _pickOnMapInline,
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor:
+                                                  const Color(0xFF3F8E6B),
+                                              foregroundColor: Colors.white,
+                                              elevation: 0,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 14,
+                                              ),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(18),
+                                              ),
+                                            ),
+                                            child: const FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.map_rounded,
+                                                      size: 18),
+                                                  SizedBox(width: 8),
+                                                  Text(
+                                                    'Pick on Map',
+                                                    style: TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.w900,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _homeMapPreview(),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Tap "Pick" to choose location on map.',
                                       style: TextStyle(
-                                        fontSize: 14.5,
-                                        fontWeight: FontWeight.w900,
+                                        color: Colors.white.withOpacity(0.55),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
                                       ),
                                     ),
-                            ),
+                                    if (_locationError != null) ...[
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        _locationError!,
+                                        style: const TextStyle(
+                                          color: Colors.redAccent,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 50,
+                                child: ElevatedButton(
+                                  onPressed: _saving ? null : _saveProfile,
+                                  child: _saving
+                                      ? const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'Save Changes',
+                                          style: TextStyle(
+                                            fontSize: 14.5,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
+                  ),
       ),
     );
   }
@@ -1169,6 +1226,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return TextFormField(
       controller: _nameCtrl,
       keyboardType: TextInputType.name,
+      inputFormatters: [
+        LengthLimitingTextInputFormatter(50),
+      ],
       validator: _validateName,
       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
       cursorColor: AppColors.mint,
@@ -1195,7 +1255,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return IntlPhoneField(
       initialCountryCode: _initialCountryCode,
       initialValue: _initialPhoneLocal.isEmpty ? null : _initialPhoneLocal,
-      disableLengthCheck: true,
+      keyboardType: TextInputType.phone,
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+      ],
       cursorColor: AppColors.mint,
       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
       dropdownTextStyle: TextStyle(
@@ -1219,12 +1282,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
         ),
       ),
       onChanged: (phone) {
+        final rawLocal = phone.number.trim();
+
         _fullPhone = phone.completeNumber;
-        _localPhoneDigits = phone.number.replaceAll(RegExp(r'\D'), '');
+        _localPhoneDigits = rawLocal;
+        _isPhoneValid = phone.isValidNumber();
 
-        final err = _validatePhoneLocalDigits(_localPhoneDigits);
-
-        setState(() => _phoneError = err);
+        setState(() {
+          _phoneError = _validatePhoneLocalDigits(rawLocal);
+        });
       },
     );
   }
