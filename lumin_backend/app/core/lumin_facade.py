@@ -692,20 +692,24 @@ class LuminFacade:
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
             )
             notification_payload = notification.to_dict()
-            self.db.insert_notification(notification_payload)
-            
+            saved_notification = self.db.insert_notification(notification_payload)
+
+            print("SAVED BILL NOTIFICATION:", saved_notification)
 
             fcm_token = self.db.get_user_fcm_token(user_id)
-
             print("FCM TOKEN:", fcm_token)
 
+            push_sent = False
+
             if fcm_token:
-            
-                FCMService.send_push(
-                        fcm_token=fcm_token,
-                        title="LUMIN Bill Alert",
-                        body=content[:100],
-                    )
+                push_sent = FCMService.send_push(
+                    fcm_token=fcm_token,
+                    title=notification.getPushTitle(),
+                    body=notification.getPushBody(),
+                )
+                print("FCM PUSH SENT:", push_sent)
+            else:
+                print("FCM PUSH SKIPPED: No fcm_token found")
         
         payload = bill_manager.build_db_payload()
         self.db.save_current_cycle_bill(user_id, payload)

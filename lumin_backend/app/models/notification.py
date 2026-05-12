@@ -213,6 +213,7 @@ class Notification:
         titles = {
             "recommendation":  "💡 Lumin Recommendation",
             "bill_warning":    "⚠️ Bill Warning",
+            "bill_update":     "🔔 Bill Update",
             "forecast_ready":  "☀️ Solar Forecast Ready",
             "device_warning":  "⚠️ No Solar Data Today",
             "feature_disabled": "🚫 Solar Forecast Paused",
