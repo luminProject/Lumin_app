@@ -8,44 +8,111 @@ import supabase as supabase_
 
 load_dotenv()
 
+# IMPORTANT:
+# Use SERVICE ROLE KEY for demo scripts
+# so updates bypass RLS.
 db = supabase_.create_client(
     os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY"),
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
 )
 
 USER_ID = "f4cbdd41-e112-443f-87b6-c21d50ea4817"
+
 BASE_URL = "http://127.0.0.1:8000"
 
 
-def get_demo_dates():
+# =========================================================
+# DATE HELPERS
+# =========================================================
+
+def get_demo_dates(checkpoint_day=7):
+
     today = date.today()
-    last_billing_end_date = today - timedelta(days=8)
-    cycle_start = last_billing_end_date + timedelta(days=1)
+
+    cycle_start = today - timedelta(days=checkpoint_day)
+
+    last_billing_end_date = cycle_start - timedelta(days=1)
+
     return today, last_billing_end_date, cycle_start
 
 
-def reset():
-    db.table("energycalculation").delete().eq("user_id", USER_ID).execute()
-    db.table("billprediction").delete().eq("user_id", USER_ID).execute()
-    db.table("notification").delete().eq("user_id", USER_ID).execute()
+# =========================================================
+# PROFILE
+# =========================================================
 
-    today, last_billing_end_date, cycle_start = get_demo_dates()
+def profile():
 
-    db.table("users").update({
+    rows = (
+        db.table("users")
+        .select("user_id, last_billing_end_date")
+        .eq("user_id", USER_ID)
+        .execute()
+    ).data
+
+    print("\n=== USER PROFILE ===")
+
+    print(
+        json.dumps(
+            rows,
+            indent=2,
+            ensure_ascii=False
+        )
+    )
+
+
+# =========================================================
+# RESET
+# =========================================================
+
+def reset(checkpoint_day=7):
+
+    db.table("energycalculation").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    db.table("billprediction").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    db.table("notification").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    today, last_billing_end_date, cycle_start = get_demo_dates(
+        checkpoint_day
+    )
+
+    result = db.table("users").update({
         "last_billing_end_date": last_billing_end_date.isoformat()
-    }).eq("user_id", USER_ID).execute()
+    }).eq(
+        "user_id",
+        USER_ID
+    ).execute()
 
-    print("✅ Reset done")
+    print("USER UPDATE RESULT:", result.data)
+
+    print("\n✅ Reset done")
     print(f"Today: {today}")
+    print(f"Checkpoint day: {checkpoint_day}")
     print(f"Last billing end date: {last_billing_end_date}")
     print(f"Cycle start: {cycle_start}")
 
 
-def add(days: int, consumption: float):
-    _, _, cycle_start = get_demo_dates()
+# =========================================================
+# ADD ENERGY DATA
+# =========================================================
+
+def add(days: int, consumption: float, checkpoint_day=7):
+
+    _, _, cycle_start = get_demo_dates(checkpoint_day)
 
     rows = []
+
     for i in range(days):
+
         d = cycle_start + timedelta(days=i)
 
         rows.append({
@@ -58,14 +125,28 @@ def add(days: int, consumption: float):
             "carbon_reduction": 0,
         })
 
-    db.table("energycalculation").upsert(rows).execute()
+    db.table("energycalculation").upsert(
+        rows,
+        on_conflict="user_id,date"
+    ).execute()
 
-    print(f"✅ Added {days} day(s), consumption={consumption} kWh/day")
-    print(f"Data range: {cycle_start} → {cycle_start + timedelta(days=days - 1)}")
+    print(f"✅ Added {days} day(s)")
+    print(f"Consumption: {consumption} kWh/day")
+
+    print(
+        f"Data range: "
+        f"{cycle_start} → "
+        f"{cycle_start + timedelta(days=days - 1)}"
+    )
 
 
-def set_limit(limit: float):
-    _, _, cycle_start = get_demo_dates()
+# =========================================================
+# SET LIMIT
+# =========================================================
+
+def set_limit(limit: float, checkpoint_day=7):
+
+    _, _, cycle_start = get_demo_dates(checkpoint_day)
 
     rows = (
         db.table("billprediction")
@@ -76,10 +157,19 @@ def set_limit(limit: float):
     ).data
 
     if rows:
+
         db.table("billprediction").update({
             "limit_amount": limit
-        }).eq("user_id", USER_ID).eq("cycle_start", cycle_start.isoformat()).execute()
+        }).eq(
+            "user_id",
+            USER_ID
+        ).eq(
+            "cycle_start",
+            cycle_start.isoformat()
+        ).execute()
+
     else:
+
         db.table("billprediction").insert({
             "user_id": USER_ID,
             "cycle_start": cycle_start.isoformat(),
@@ -95,25 +185,46 @@ def set_limit(limit: float):
     print(f"✅ Limit set to {limit} SAR")
 
 
+# =========================================================
+# RUN CHECKPOINT
+# =========================================================
+
 def run_checkpoint():
+
     url = f"{BASE_URL}/internal/run-bill-checkpoint"
 
     try:
+
         r = requests.post(url, timeout=60)
+
         print("STATUS:", r.status_code)
 
         try:
-            print(json.dumps(r.json(), indent=2, ensure_ascii=False))
+
+            print(
+                json.dumps(
+                    r.json(),
+                    indent=2,
+                    ensure_ascii=False
+                )
+            )
+
         except Exception:
             print(r.text)
 
     except Exception as e:
+
         print("❌ Could not reach backend")
         print(e)
         print("Make sure uvicorn is running")
 
 
+# =========================================================
+# BILL
+# =========================================================
+
 def bill():
+
     rows = (
         db.table("billprediction")
         .select("*")
@@ -123,10 +234,22 @@ def bill():
     ).data
 
     print("\n=== BILLPREDICTION ===")
-    print(json.dumps(rows, indent=2, ensure_ascii=False))
 
+    print(
+        json.dumps(
+            rows,
+            indent=2,
+            ensure_ascii=False
+        )
+    )
+
+
+# =========================================================
+# NOTIFICATIONS
+# =========================================================
 
 def notifications():
+
     rows = (
         db.table("notification")
         .select("*")
@@ -136,37 +259,89 @@ def notifications():
     ).data
 
     print("\n=== NOTIFICATIONS ===")
-    print(json.dumps(rows, indent=2, ensure_ascii=False))
 
-
-def reset_checkpoint():
-    db.table("billprediction").update({
-        "last_checkpoint_day": None,
-        "forecast_available": False,
-    }).eq("user_id", USER_ID).execute()
-
-    print("✅ Checkpoint reset")
+    print(
+        json.dumps(
+            rows,
+            indent=2,
+            ensure_ascii=False
+        )
+    )
 
 
 # =========================================================
-# DEMO CASES
+# DEMOS
 # =========================================================
+
+def demo_no_end_date():
+
+    print("\n===== DEMO: NO BILLING END DATE =====")
+
+    db.table("energycalculation").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    db.table("billprediction").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    db.table("notification").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    db.table("users").update({
+        "last_billing_end_date": None
+    }).eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    print("❌ No billing end date configured")
+
+    print("Expected behavior:")
+    print("- setup_required = true")
+    print("- No bill prediction")
+    print("- User must configure billing info first")
+
+    profile()
+    bill()
+    notifications()
+
 
 def demo_no_limit():
+
     print("\n===== DEMO: NO LIMIT SET =====")
 
-    db.table("energycalculation").delete().eq("user_id", USER_ID).execute()
-    db.table("billprediction").delete().eq("user_id", USER_ID).execute()
-    db.table("notification").delete().eq("user_id", USER_ID).execute()
+    db.table("energycalculation").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
 
-    today, last_billing_end_date, cycle_start = get_demo_dates()
+    db.table("billprediction").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    db.table("notification").delete().eq(
+        "user_id",
+        USER_ID
+    ).execute()
+
+    today, last_billing_end_date, cycle_start = get_demo_dates(7)
 
     db.table("users").update({
         "last_billing_end_date": last_billing_end_date.isoformat()
-    }).eq("user_id", USER_ID).execute()
+    }).eq(
+        "user_id",
+        USER_ID
+    ).execute()
 
     print("✅ User has billing cycle")
     print("❌ No bill limit set yet")
+
     print(f"Today: {today}")
     print(f"Last billing end date: {last_billing_end_date}")
     print(f"Cycle start: {cycle_start}")
@@ -176,102 +351,157 @@ def demo_no_limit():
 
 
 def demo_not_enough_data():
+
     print("\n===== DEMO: NOT ENOUGH DATA =====")
-    reset()
-    set_limit(50)
-    add(6, 10)
+
+    reset(7)
+
+    set_limit(50, 7)
+
+    add(6, 10, 7)
+
     run_checkpoint()
+
     bill()
     notifications()
 
 
 def demo_warning():
+
     print("\n===== DEMO: BILL WARNING =====")
-    reset()
-    set_limit(20)
-    add(7, 30)
+
+    reset(7)
+
+    set_limit(20, 7)
+
+    add(7, 30, 7)
+
     run_checkpoint()
+
     bill()
     notifications()
 
 
 def demo_safe_update():
+
     print("\n===== DEMO: SAFE BILL UPDATE =====")
-    reset()
-    set_limit(200)
-    add(7, 10)
+
+    reset(7)
+
+    set_limit(200, 7)
+
+    add(7, 10, 7)
+
     run_checkpoint()
+
     bill()
     notifications()
 
 
 def demo_no_duplicate():
+
     print("\n===== DEMO: NO DUPLICATE NOTIFICATION =====")
-    reset()
-    set_limit(20)
-    add(7, 30)
+
+    reset(7)
+
+    set_limit(20, 7)
+
+    add(7, 30, 7)
 
     print("\n--- First run ---")
+
     run_checkpoint()
 
-    print("\n--- Second run, should NOT duplicate notification ---")
+    print("\n--- Second run ---")
+
     run_checkpoint()
 
     bill()
     notifications()
 
 
+def demo_checkpoint_14():
+
+    print("\n===== DEMO: CHECKPOINT 14 =====")
+
+    reset(14)
+
+    set_limit(20, 14)
+
+    add(14, 30, 14)
+
+    run_checkpoint()
+
+    bill()
+    notifications()
+
+
+def demo_checkpoint_21():
+
+    print("\n===== DEMO: CHECKPOINT 21 =====")
+
+    reset(21)
+
+    set_limit(20, 21)
+
+    add(21, 30, 21)
+
+    run_checkpoint()
+
+    bill()
+    notifications()
+
+
+def demo_checkpoint_28():
+
+    print("\n===== DEMO: CHECKPOINT 28 =====")
+
+    reset(28)
+
+    set_limit(20, 28)
+
+    add(28, 30, 28)
+
+    run_checkpoint()
+
+    bill()
+    notifications()
+
+
+# =========================================================
+# HELP
+# =========================================================
+
 HELP = """
-Usage:
-
-Basic:
-  python bill_demo.py reset
-  python bill_demo.py add 7 10
-  python bill_demo.py limit 50
-  python bill_demo.py run
-  python bill_demo.py bill
-  python bill_demo.py notifications
-  python bill_demo.py resetcp
-
-Demo cases:
+Main demos:
+  python bill_demo.py demo_no_end_date
   python bill_demo.py demo_no_limit
   python bill_demo.py demo_no_data
-  python bill_demo.py demo_safe
   python bill_demo.py demo_warning
+  python bill_demo.py demo_safe
   python bill_demo.py demo_duplicate
+
+Extra checkpoints:
+  python bill_demo.py demo_cp14
+  python bill_demo.py demo_cp21
+  python bill_demo.py demo_cp28
 """
 
 
+# =========================================================
+# MAIN
+# =========================================================
+
 if __name__ == "__main__":
+
     if len(sys.argv) < 2:
         print(HELP)
         sys.exit(0)
 
     cmd = sys.argv[1]
 
-    if cmd == "reset":
-        reset()
-
-    elif cmd == "add":
-        days = int(sys.argv[2])
-        consumption = float(sys.argv[3]) if len(sys.argv) > 3 else 10
-        add(days, consumption)
-
-    elif cmd == "limit":
-        limit = float(sys.argv[2])
-        set_limit(limit)
-
-    elif cmd == "run":
-        run_checkpoint()
-
-    elif cmd == "bill":
-        bill()
-
-    elif cmd == "notifications":
-        notifications()
-
-    elif cmd == "resetcp":
-        reset_checkpoint()
+    if cmd == "demo_no_end_date":
+        demo_no_end_date()
 
     elif cmd == "demo_no_limit":
         demo_no_limit()
@@ -287,6 +517,24 @@ if __name__ == "__main__":
 
     elif cmd == "demo_duplicate":
         demo_no_duplicate()
+
+    elif cmd == "demo_cp14":
+        demo_checkpoint_14()
+
+    elif cmd == "demo_cp21":
+        demo_checkpoint_21()
+
+    elif cmd == "demo_cp28":
+        demo_checkpoint_28()
+
+    elif cmd == "bill":
+        bill()
+
+    elif cmd == "notifications":
+        notifications()
+
+    elif cmd == "profile":
+        profile()
 
     else:
         print(HELP)
